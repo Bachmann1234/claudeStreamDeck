@@ -15,6 +15,7 @@ from .protocol import Message, ProtocolError, parse_message
 from .state import (
     APPEARANCE,
     EVENT_TO_STATE,
+    STATE_PRIORITY,
     KeyAppearance,
     KeyState,
     SessionModel,
@@ -32,5 +33,6 @@ __all__ = [
     "SessionModel",
     "APPEARANCE",
     "EVENT_TO_STATE",
+    "STATE_PRIORITY",
     "resolve_state",
 ]

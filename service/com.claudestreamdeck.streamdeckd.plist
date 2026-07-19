@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS LaunchAgent for streamdeckd. TEMPLATE — replace every /ABSOLUTE/PATH
+  before use (see docs/setup.md §9). Runs the daemon at login and restarts it
+  if it crashes. Install as a per-user agent:
+
+      cp service/com.claudestreamdeck.streamdeckd.plist \
+         ~/Library/LaunchAgents/
+      # edit the copy: set the real venv path + your home dir, then:
+      launchctl load ~/Library/LaunchAgents/com.claudestreamdeck.streamdeckd.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.claudestreamdeck.streamdeckd</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/ABSOLUTE/PATH/claudeStreamDeck/.venv/bin/streamdeckd</string>
+    </array>
+
+    <!-- Start at login and keep it alive (restart on crash). -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Throttle restart loops so a hard-failing daemon doesn't spin. -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>/ABSOLUTE/PATH/HOME/.claudeStreamDeck/streamdeckd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/ABSOLUTE/PATH/HOME/.claudeStreamDeck/streamdeckd.log</string>
+
+    <!-- Uncomment / edit to override the socket path or Ghostty app name.
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>STREAMDECKD_GHOSTTY</key>
+        <string>Ghostty</string>
+    </dict>
+    -->
+</dict>
+</plist>

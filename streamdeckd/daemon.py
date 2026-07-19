@@ -107,10 +107,11 @@ class Daemon:
         )
         if result.action == "overflow":
             log.warning(
-                "no free key for session %s — %d keys all in use; session "
-                "tracked but unpainted",
+                "no key for session %s — all %d keys held by equal/higher "
+                "priority sessions; tracked but unpainted (%d parked)",
                 msg.session_id[:8],
                 self.model.key_count,
+                len(self.model.parked()),
             )
         return result
 

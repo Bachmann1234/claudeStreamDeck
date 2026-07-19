@@ -115,6 +115,19 @@ def appearance_for(state: KeyState, label: str = "") -> KeyAppearance:
     return KeyAppearance(state=base.state, color=base.color, label=label, pulse=base.pulse)
 
 
+# How much a session "deserves" a key when the deck is full. A session needing
+# you (ATTENTION) outranks one merely working, which outranks a finished (DONE)
+# one — so an urgent session can evict a finished one for its key. Drives
+# overflow admission / eviction in :class:`SessionModel`.
+STATE_PRIORITY: dict[KeyState, int] = {
+    KeyState.ATTENTION: 3,
+    KeyState.WORKING: 2,
+    KeyState.STARTING: 1,
+    KeyState.DONE: 0,
+    KeyState.EMPTY: -1,
+}
+
+
 @dataclass
 class Slot:
     """One tracked session and the key it owns.
@@ -133,6 +146,10 @@ class Slot:
     cwd: str | None = None
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
+    # Monotonic recency stamp assigned by the model on every touch. Used for
+    # LRU tie-breaks in overflow handling — finer-grained than ``updated_at``,
+    # whose second resolution can't order events within the same second.
+    seq: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -160,19 +177,35 @@ class ApplyResult:
     def released(self) -> bool:
         return self.action == "released"
 
+    @property
+    def parked(self) -> bool:
+        """True when the session is tracked but holds no key (overflow)."""
+        return self.slot is not None and self.slot.key_index is None
+
 
 class SessionModel:
-    """``session_id -> Slot`` with stable, lowest-free key allocation.
+    """``session_id -> Slot`` with stable key allocation and overflow handling.
 
     Not thread-safe by design — the daemon owns the lock. A session keeps its
-    key for its whole life (stable mapping); the key is freed only on release.
+    key for its whole life; a key is freed only on release **or** when the
+    session is *parked* to make room for a more-deserving one (overflow).
+
+    Overflow policy when all keys are taken and a new/urgent session needs one:
+    with ``evict_finished_when_full`` (default), the least-recently-active
+    keyed session whose :data:`STATE_PRIORITY` is *below* the newcomer's is
+    parked and its key handed over — so a session that finished (DONE) yields
+    its key to one that's working, and any keyed session yields to one that
+    now needs you (ATTENTION). When a key frees up, the highest-priority parked
+    session (oldest first) is promoted back onto it.
     """
 
-    def __init__(self, key_count: int = 15):
+    def __init__(self, key_count: int = 15, *, evict_finished_when_full: bool = True):
         if key_count < 1:
             raise ValueError("key_count must be >= 1")
         self.key_count = key_count
+        self.evict_finished_when_full = evict_finished_when_full
         self._slots: dict[str, Slot] = {}
+        self._seq = 0
 
     # -- queries -----------------------------------------------------------
 
@@ -181,6 +214,10 @@ class SessionModel:
 
     def slots(self) -> list[Slot]:
         return list(self._slots.values())
+
+    def parked(self) -> list[Slot]:
+        """Tracked sessions that currently hold no key (overflow)."""
+        return [s for s in self._slots.values() if s.key_index is None]
 
     def session_for_key(self, key_index: int) -> Slot | None:
         for slot in self._slots.values():
@@ -198,16 +235,66 @@ class SessionModel:
                 return i
         return None
 
+    def _bump(self, slot: Slot) -> None:
+        self._seq += 1
+        slot.seq = self._seq
+        slot.updated_at = _now()
+
+    # -- overflow admission ------------------------------------------------
+
+    def _admit(self, slot: Slot) -> None:
+        """Give ``slot`` a key: a free one, or (if enabled) one evicted from a
+        lower-priority keyed session. Leaves it parked if neither is possible."""
+        if slot.key_index is not None:
+            return
+        free = self._next_free_key()
+        if free is not None:
+            slot.key_index = free
+            return
+        if not self.evict_finished_when_full:
+            return
+        victim = self._evict_target(STATE_PRIORITY[slot.state])
+        if victim is not None:
+            slot.key_index = victim.key_index
+            victim.key_index = None  # park the victim
+
+    def _evict_target(self, incoming_priority: int) -> Slot | None:
+        """The least-deserving keyed session below ``incoming_priority``: lowest
+        priority first, oldest (smallest ``seq``) as the LRU tie-break."""
+        candidates = [
+            s
+            for s in self._slots.values()
+            if s.key_index is not None
+            and STATE_PRIORITY[s.state] < incoming_priority
+        ]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda s: (STATE_PRIORITY[s.state], s.seq))
+
+    def _promote_waiting(self) -> None:
+        """Fill any free keys with the best parked sessions (highest priority,
+        oldest first)."""
+        waiting = self.parked()
+        if not waiting:
+            return
+        waiting.sort(key=lambda s: (-STATE_PRIORITY[s.state], s.seq))
+        for slot in waiting:
+            free = self._next_free_key()
+            if free is None:
+                break
+            slot.key_index = free
+
     # -- mutation ----------------------------------------------------------
 
     def apply(self, msg) -> ApplyResult:
         """Fold one :class:`~streamdeckd.protocol.Message` into the model.
 
-        - Unknown session + a non-release event  -> allocate a key (STARTING or
-          the mapped state).
+        - Unknown session + a non-release event  -> track it and try to admit a
+          key (allocating, or evicting a finished session when full).
         - Known session                          -> update state / metadata,
-          keeping its key.
-        - RELEASE (SessionEnd)                    -> free the key, drop the slot.
+          keeping its key; if it grew more urgent while parked, try to admit it.
+        - RELEASE (SessionEnd)                    -> drop the slot, then promote
+          the best parked session onto the freed key.
         """
         target = resolve_state(event=msg.event, state=msg.state)
 
@@ -217,15 +304,16 @@ class SessionModel:
             if existing is None:
                 return ApplyResult(slot=None, action="ignored")
             del self._slots[msg.session_id]
+            if existing.key_index is not None:
+                self._promote_waiting()  # freed key goes to a waiting session
             return ApplyResult(slot=existing, action="released")
 
         if existing is None:
-            # First time we've heard of this session -> claim a key.
-            key_index = self._next_free_key()
+            # First time we've heard of this session -> track and try to admit.
             state = target if isinstance(target, KeyState) else KeyState.STARTING
             slot = Slot(
                 session_id=msg.session_id,
-                key_index=key_index,
+                key_index=None,
                 state=state,
                 label=msg.label or _default_label(msg),
                 uuid=msg.uuid,
@@ -233,12 +321,15 @@ class SessionModel:
                 cwd=msg.cwd,
             )
             self._slots[msg.session_id] = slot
+            self._bump(slot)
+            self._admit(slot)
             return ApplyResult(
                 slot=slot,
-                action="allocated" if key_index is not None else "overflow",
+                action="allocated" if slot.key_index is not None else "overflow",
             )
 
-        # Known session: update in place, keep the key.
+        # Known session: update in place.
+        prev_priority = STATE_PRIORITY[existing.state]
         if isinstance(target, KeyState):
             existing.state = target
         if msg.label:
@@ -251,12 +342,19 @@ class SessionModel:
             existing.tty = msg.tty
         if msg.cwd:
             existing.cwd = msg.cwd
-        existing.updated_at = _now()
-        return ApplyResult(slot=existing, action="updated")
+        self._bump(existing)
+        # A parked session that just grew more urgent gets a fresh admission try.
+        if existing.key_index is None and STATE_PRIORITY[existing.state] > prev_priority:
+            self._admit(existing)
+        action = "updated" if existing.key_index is not None else "overflow"
+        return ApplyResult(slot=existing, action=action)
 
     def remove(self, session_id: str) -> Slot | None:
-        """Drop a session (e.g. its surface died on focus). Frees its key."""
-        return self._slots.pop(session_id, None)
+        """Drop a session (e.g. its surface died on focus). Frees + promotes."""
+        slot = self._slots.pop(session_id, None)
+        if slot is not None and slot.key_index is not None:
+            self._promote_waiting()
+        return slot
 
     # -- rendering ---------------------------------------------------------
 

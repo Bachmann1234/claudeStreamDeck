@@ -64,6 +64,19 @@ def test_writes_snapshot_json_and_pngs(tmp_path):
     assert data["keys"][0]["label"] == "repo-x"
     assert (tmp_path / "key_00.png").exists()
     assert (tmp_path / "key_01.png").exists()
+    assert (tmp_path / "deck.png").exists()  # composite whole-board preview
+
+
+def test_composite_deck_png_has_grid_dimensions(tmp_path):
+    from PIL import Image
+
+    deck = VirtualDeck(
+        key_count=15, out_dir=tmp_path, write_png=True, key_size=96, columns=5
+    )
+    deck.render([appearance_for(KeyState.EMPTY) for _ in range(15)])
+    img = Image.open(tmp_path / "deck.png")
+    # 5 cols × 3 rows of 96px keys, 10px gaps, 16px padding.
+    assert img.size == (16 * 2 + 5 * 96 + 4 * 10, 16 * 2 + 3 * 96 + 2 * 10)
 
 
 def test_no_png_when_disabled(tmp_path):

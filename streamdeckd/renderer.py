@@ -43,8 +43,9 @@ class VirtualDeck:
     """A fully inspectable, hardware-free deck.
 
     Keeps the last rendered frame in memory (:attr:`keys`) and, if given an
-    ``out_dir``, writes ``snapshot.json`` plus ``key_00.png`` … per render so a
-    human (or a test) can eyeball exactly what a physical deck would show.
+    ``out_dir``, writes ``snapshot.json``, one ``key_NN.png`` per key, and a
+    composite ``deck.png`` of the whole board per render — so a human (or a
+    test) can eyeball exactly what a physical deck would show.
     """
 
     def __init__(
@@ -115,6 +116,28 @@ class VirtualDeck:
             self._render_key_png(appearance).save(
                 self.out_dir / f"key_{i:02d}.png"
             )
+        self._write_deck_png()
+
+    def _write_deck_png(self, *, gap: int = 10, pad: int = 16) -> None:
+        """Compose all keys into one ``deck.png`` laid out like the physical
+        3×N board — the glanceable "what does my deck look like right now" view.
+        Each tile is stamped with its key index so it maps to ``{"press": N}``."""
+        assert self.out_dir is not None
+        size = self.key_size
+        cols = self.columns
+        rows = (self.key_count + cols - 1) // cols
+        width = pad * 2 + cols * size + (cols - 1) * gap
+        height = pad * 2 + rows * size + (rows - 1) * gap
+        board = Image.new("RGB", (width, height), (24, 24, 26))
+        for i, appearance in enumerate(self.keys):
+            r, c = divmod(i, cols)
+            x = pad + c * (size + gap)
+            y = pad + r * (size + gap)
+            tile = self._render_key_png(appearance)
+            draw = ImageDraw.Draw(tile)
+            draw.text((3, 2), str(i), fill=(150, 150, 150))  # key index
+            board.paste(tile, (x, y))
+        board.save(self.out_dir / "deck.png")
 
     def _render_key_png(self, appearance: KeyAppearance):  # -> PIL.Image
         size = self.key_size

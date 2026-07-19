@@ -101,10 +101,12 @@ step toward the next.
   see [`docs/correlation-rationale.md`](./docs/correlation-rationale.md)); the
   **daemon** sends the focus event on a key press. The one-time TCC Automation
   grant therefore lands on both, each on first use.
-- What to do when there are more than 15 concurrent sessions. **Current
-  behavior:** the 16th session is tracked but gets no key (logged as
-  `overflow`); a key frees up only when some session ends (no auto-reassign
-  yet). Paging / LRU-evict is still open (M5).
+- ~~What to do when there are more than 15 concurrent sessions~~ **Decided:
+  priority-based LRU eviction** (M5, `SessionModel`). When the deck is full a
+  new/urgent session evicts the least-recently-active *lower-priority* session
+  (ATTENTION > WORKING > STARTING > DONE) and parks it; a freed key promotes the
+  best-ranked parked session back. Paging remains a possible future addition for
+  very high counts.
 - Whether to depend on tmux for session survival across Ghostty restarts, or
   accept that a UUID (and its key) dies with the surface. **Still open** — today
   the daemon prunes a dead mapping on the first failed focus and re-resolves on

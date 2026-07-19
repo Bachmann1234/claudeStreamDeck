@@ -47,9 +47,15 @@ Every state change rewrites the output directory:
 # live text view of all 15 keys
 watch -n1 'cat ~/.claudeStreamDeck/virtualdeck/snapshot.json'
 
-# or open the per-key PNGs
+# glanceable picture of the whole 3×5 board (updates every render)
+open ~/.claudeStreamDeck/virtualdeck/deck.png
+
+# or a single key
 open ~/.claudeStreamDeck/virtualdeck/key_00.png
 ```
+
+`deck.png` is a composite of all keys laid out like the physical board, each
+tile stamped with its key index (so key `3` maps to `{"press": 3}`).
 
 `snapshot.json` looks like:
 
@@ -130,6 +136,31 @@ and reports it, so a key press can focus the exact surface. Two things to know:
 
 `Ctrl-C` (or `SIGTERM`) blanks the deck, closes the renderer, and unlinks the
 socket cleanly.
+
+## 9. Run on login (launchd)
+
+To start `streamdeckd` automatically and keep it alive, install the LaunchAgent
+template [`../service/com.claudestreamdeck.streamdeckd.plist`](../service/com.claudestreamdeck.streamdeckd.plist):
+
+```bash
+cp service/com.claudestreamdeck.streamdeckd.plist ~/Library/LaunchAgents/
+# Edit the copy: replace every /ABSOLUTE/PATH...
+#   ProgramArguments  -> your venv's streamdeckd  (`which streamdeckd`)
+#   Standard*Path     -> $HOME/.claudeStreamDeck/streamdeckd.log
+launchctl load ~/Library/LaunchAgents/com.claudestreamdeck.streamdeckd.plist
+```
+
+`RunAtLoad` starts it at login; `KeepAlive` restarts it on crash (throttled to
+every 10 s). Logs land in `~/.claudeStreamDeck/streamdeckd.log`. To stop and
+remove it:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.claudestreamdeck.streamdeckd.plist
+```
+
+> **Note:** the daemon sends Apple events to focus surfaces, so the first key
+> press after install triggers the one-time Automation (TCC) prompt attributed
+> to `streamdeckd` — approve it once.
 
 ## Troubleshooting
 

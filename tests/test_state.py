@@ -92,13 +92,15 @@ def test_release_unknown_session_is_ignored():
 
 
 def test_overflow_tracks_without_key():
+    # Deck full of same-priority sessions -> newcomer can't evict, is parked.
     m = SessionModel(key_count=2)
     m.apply(_msg("a", "SessionStart"))
     m.apply(_msg("b", "SessionStart"))
     over = m.apply(_msg("c", "SessionStart"))
-    assert over.action == "overflow"
+    assert over.action == "overflow" and over.parked
     assert over.slot.key_index is None
     assert m.get("c") is not None  # still tracked
+    assert [s.session_id for s in m.parked()] == ["c"]
 
 
 def test_unknown_session_non_start_event_still_allocates():
@@ -127,6 +129,87 @@ def test_explicit_label_wins():
     m = SessionModel()
     m.apply(_msg("a", "SessionStart", cwd="/w/repo", label="my-label"))
     assert m.get("a").label == "my-label"
+
+
+# -- overflow: eviction & promotion ----------------------------------------
+
+
+def _fill_done(m, n):
+    """Fill n keys with finished (DONE) sessions, oldest first."""
+    for i in range(n):
+        m.apply(_msg(f"done{i}", "SessionStart"))
+        m.apply(_msg(f"done{i}", "Stop"))
+
+
+def test_new_session_evicts_a_finished_one_when_full():
+    m = SessionModel(key_count=2)
+    _fill_done(m, 2)  # keys 0,1 held by finished sessions
+    r = m.apply(_msg("fresh", "SessionStart"))
+    assert r.action == "allocated"  # it got a key by eviction
+    assert r.slot.key_index is not None
+    # Exactly one finished session was parked to make room.
+    assert len(m.parked()) == 1
+    assert m.parked()[0].session_id.startswith("done")
+
+
+def test_eviction_is_lru_among_finished():
+    m = SessionModel(key_count=2)
+    _fill_done(m, 2)  # done0 finished before done1 -> done0 is older (LRU)
+    m.apply(_msg("fresh", "SessionStart"))
+    # The older finished session (done0) is the one evicted.
+    assert m.get("done0").key_index is None
+    assert m.get("done1").key_index is not None
+
+
+def test_no_eviction_when_disabled():
+    m = SessionModel(key_count=2, evict_finished_when_full=False)
+    _fill_done(m, 2)
+    r = m.apply(_msg("fresh", "SessionStart"))
+    assert r.action == "overflow" and r.slot.key_index is None
+    assert m.get("done0").key_index is not None  # nobody evicted
+
+
+def test_equal_priority_does_not_evict():
+    # A working session can't push out another working session.
+    m = SessionModel(key_count=1)
+    m.apply(_msg("a", "SessionStart"))
+    m.apply(_msg("a", "UserPromptSubmit"))  # a: WORKING, key 0
+    m.apply(_msg("b", "SessionStart"))
+    r = m.apply(_msg("b", "UserPromptSubmit"))  # b wants a key, same priority
+    assert r.parked and m.get("a").key_index == 0
+
+
+def test_parked_session_that_needs_you_evicts_a_working_one():
+    m = SessionModel(key_count=1)
+    m.apply(_msg("a", "SessionStart"))
+    m.apply(_msg("a", "UserPromptSubmit"))  # a: WORKING, holds key 0
+    m.apply(_msg("b", "SessionStart"))       # b parked (equal/again lower)
+    r = m.apply(_msg("b", "Notification"))    # b now ATTENTION -> outranks a
+    assert r.slot.key_index == 0             # b took the key
+    assert m.get("a").key_index is None       # a parked
+
+
+def test_release_promotes_highest_priority_parked():
+    m = SessionModel(key_count=1)
+    m.apply(_msg("a", "SessionStart"))
+    m.apply(_msg("a", "Notification"))       # a: ATTENTION, key 0 (unevictable)
+    m.apply(_msg("low", "SessionStart"))     # parked
+    m.apply(_msg("low", "Stop"))             # low: DONE, parked
+    m.apply(_msg("hi", "SessionStart"))      # parked
+    m.apply(_msg("hi", "UserPromptSubmit"))  # hi: WORKING, still parked (a unevictable)
+    assert m.get("low").key_index is None and m.get("hi").key_index is None
+    m.apply(_msg("a", "SessionEnd"))         # frees key 0
+    # The freed key goes to the higher-priority parked session (hi), not low.
+    assert m.get("hi").key_index == 0
+    assert m.get("low").key_index is None
+
+
+def test_remove_frees_key_and_promotes():
+    m = SessionModel(key_count=1)
+    m.apply(_msg("a", "SessionStart"))       # key 0
+    m.apply(_msg("b", "SessionStart"))       # parked
+    m.remove("a")                             # e.g. surface died on focus
+    assert m.get("b").key_index == 0          # promoted onto the freed key
 
 
 # -- appearance snapshot ---------------------------------------------------
