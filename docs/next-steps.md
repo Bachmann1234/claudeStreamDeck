@@ -11,9 +11,12 @@ close throwaway windows near your real sessions.
 
 ---
 
-## 1. Live smoke test the hooks + daemon (no hardware needed) ⏱️ ~15 min
+## 1. Live smoke test the hooks + daemon (no hardware needed) — ✅ DONE 2026-07-19
 
-This proves M3 end-to-end against real Claude Code in real Ghostty.
+Proven end-to-end against real Claude Code + Ghostty 1.3.1: session lit a key,
+dim → blue → green, and `SessionEnd` blanked it. The live run also exposed the
+`/dev/tty` constraint that drove the correlation pivot (steps 2–3). Original
+checklist kept below for reference / re-runs.
 
 - [ ] Start the daemon in a spare terminal: `streamdeckd -v`
 - [ ] Watch the deck in another: `open ~/.claudeStreamDeck/virtualdeck/deck.png`
@@ -32,11 +35,13 @@ This proves M3 end-to-end against real Claude Code in real Ghostty.
 change, run the daemon with `-v` and check the socket path matches on both sides
 (`GSM_HOME` / `STREAMDECKD_SOCKET`).
 
-## 2. Confirm the correlation trick works live ⏱️ ~5 min (part of #1)
+## 2. Confirm the correlation works live — ✅ DONE 2026-07-19
 
-The riskiest unproven assumption: that the `SessionStart` hook's OSC
-title-sentinel actually resolves the surface UUID (see
-`docs/correlation-rationale.md`).
+The `SessionStart` hook resolved the surface UUID and bound it in
+`registry.json`. **The original OSC title-sentinel design failed** (hooks have
+no `/dev/tty`); pivoted to focused-surface + cwd cross-check over read-only
+`osascript`, which correctly picked the newly-started window out of two
+same-cwd sessions. See the rewritten `docs/correlation-rationale.md`.
 
 - [ ] After starting a session (step 1), check the mapping was resolved:
       `cat ~/.claudeStreamDeck/registry.json` — the session's entry should have
@@ -46,7 +51,12 @@ title-sentinel actually resolves the surface UUID (see
       title before the lookup lands, the uuid will be null → tell me and I'll
       tune the retry window or hold the sentinel across attempts.
 
-## 3. Test focus-by-keypress (M4) ⏱️ ~10 min
+## 3. Test focus-by-keypress (M4) — ✅ DONE 2026-07-19 (core)
+
+`{"press":0}` raised the exact bound surface (focused flipped from this
+conversation's window to the target session's), and `last_focused_at` updated.
+Remaining M4 edge cases (cross-Space / fullscreen) are step 4. Original
+checklist below.
 
 With a resolved uuid from #2:
 

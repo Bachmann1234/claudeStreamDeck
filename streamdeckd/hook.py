@@ -8,13 +8,14 @@ swallowed, so a dead (or missing) daemon can never slow down or break Claude.
 The interesting work happens once, on ``SessionStart``: resolving *which Ghostty
 surface this session lives in*. Stock Ghostty 1.3.1 exposes no ``tty``/``pid``
 (see ``docs/tier0-validation-findings.md``), so we can't look the surface up by
-tty. Instead the hook writes a **unique title sentinel** to its own controlling
-terminal via an OSC escape, then asks Ghostty for the surface whose title
-contains that sentinel — resolving the session's UUID *from inside the session*.
-Because the sentinel embeds the session id, it is globally unique, so even
-several sessions starting at once each match only their own surface. The full
-rationale and the alternatives considered are in
-``docs/correlation-rationale.md``.
+tty. And — discovered by live testing — Claude Code runs hooks with **no
+controlling terminal** (``/dev/tty`` is "Device not configured"), so the hook
+can't write an OSC title sentinel either. What *does* work from a hook is
+read-only ``osascript``. So on ``SessionStart`` (wired **synchronously**, so it
+runs while the new window is still frontmost) the hook asks Ghostty for the
+**focused surface** and cross-checks it against the session's ``cwd`` — that is
+the window the user just typed ``claude`` into. The full rationale and the
+alternatives considered are in ``docs/correlation-rationale.md``.
 
 Install: expose as the ``claudestreamdeck-hook`` console script and point every
 hook event at it (see ``docs/setup.md`` / ``hooks/settings.snippet.json``).
@@ -27,14 +28,24 @@ import os
 import socket
 import subprocess
 import sys
-import time
 
 from .state import RELEASE, KeyState, resolve_state
 
 SOCKET_ENV = "STREAMDECKD_SOCKET"
 TARGET_ENV = "STREAMDECKD_GHOSTTY"  # override the Ghostty app name/path
-SENTINEL_PREFIX = "⟦gsm:"      # ⟦gsm:<session_id>⟧ — won't occur naturally
-SENTINEL_SUFFIX = "⟧"
+
+
+def _log(message: str) -> None:
+    """Append one diagnostic line next to the socket. Never raises."""
+    try:
+        home = os.environ.get("GSM_HOME")
+        base = os.path.expanduser(home) if home else os.path.join(
+            os.path.expanduser("~"), ".claudeStreamDeck"
+        )
+        with open(os.path.join(base, "hook.log"), "a") as f:
+            f.write(message + "\n")
+    except OSError:
+        pass
 
 
 # -- socket path (kept in sync with gsm.registry.default_home, no gsm import) --
@@ -55,18 +66,6 @@ def socket_path() -> str:
 # -- correlation: resolve this session's Ghostty surface UUID -----------------
 
 
-def _write_title(title: str) -> bool:
-    """Set the terminal (window) title via OSC 2 on the controlling tty."""
-    seq = f"\033]2;{title}\a"
-    try:
-        with open("/dev/tty", "w") as tty:
-            tty.write(seq)
-            tty.flush()
-        return True
-    except OSError:
-        return False
-
-
 def _run_osascript(script: str, *, timeout: float = 2.0) -> str:
     proc = subprocess.run(
         ["osascript", "-e", script],
@@ -83,41 +82,54 @@ def _as_applescript_str(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def resolve_uuid_via_sentinel(
-    session_id: str,
-    *,
-    target: str = "Ghostty",
-    write_title=_write_title,
-    run_osascript=_run_osascript,
-    sleep=time.sleep,
-    attempts: int = 6,
-    delay: float = 0.05,
-) -> str | None:
-    """Return this session's Ghostty surface UUID, or ``None`` if unresolvable.
-
-    Sets a unique title sentinel, then polls Ghostty for the surface whose
-    ``name`` contains it. The set-then-read pair lives entirely in this one
-    process, so the window between "title set" and "title read" is tiny and the
-    sentinel is unique — that is what contains the race. Retries a few times to
-    absorb the terminal's title-update latency; gives up quietly (returns
-    ``None``) if Ghostty isn't scriptable or the title never lands.
-    """
-    sentinel = f"{SENTINEL_PREFIX}{session_id}{SENTINEL_SUFFIX}"
-    if not write_title(sentinel):
-        return None  # no controlling tty -> can't set a title to look up
+def _focused_id(run_osascript, target: str) -> str | None:
+    """UUID of the frontmost focused surface, or None if there's no front window."""
     script = (
         f'tell application "{_as_applescript_str(target)}" to get id of '
-        f'(first terminal whose name contains "{_as_applescript_str(sentinel)}")'
+        f"focused terminal of selected tab of front window"
     )
-    for attempt in range(attempts):
-        try:
-            uuid = run_osascript(script).strip()
-        except Exception:
-            uuid = ""  # no match yet, Ghostty not up, or TCC not granted
-        if uuid:
-            return uuid
-        if attempt < attempts - 1:
-            sleep(delay)
+    try:
+        return run_osascript(script).strip() or None
+    except Exception:
+        return None
+
+
+def _ids_for_cwd(run_osascript, target: str, cwd: str) -> list[str]:
+    """UUIDs of every surface whose working directory equals ``cwd``."""
+    script = (
+        f'tell application "{_as_applescript_str(target)}" to get id of '
+        f'every terminal whose working directory is "{_as_applescript_str(cwd)}"'
+    )
+    try:
+        out = run_osascript(script).strip()
+    except Exception:
+        return []
+    # osascript renders an AppleScript list as "id1, id2"; UUIDs contain no comma.
+    return [part.strip() for part in out.split(",") if part.strip()]
+
+
+def resolve_uuid(
+    cwd: str | None,
+    *,
+    target: str = "Ghostty",
+    run_osascript=_run_osascript,
+) -> str | None:
+    """Return this session's Ghostty surface UUID, or ``None`` if unsure.
+
+    Uses only read-only ``osascript`` (the one Ghostty channel that works from a
+    hook — see the module docstring). The frontmost focused surface at
+    ``SessionStart`` is the window the user just started ``claude`` in; we return
+    it when it also matches the session ``cwd`` (or when Ghostty reports no cwd
+    matches at all). Failing that, a *unique* cwd match is used. Anything
+    ambiguous returns ``None`` rather than guess wrong — a missing binding just
+    means "focus unavailable until re-resolved", never "focus the wrong window".
+    """
+    focused = _focused_id(run_osascript, target)
+    cwd_ids = _ids_for_cwd(run_osascript, target, cwd) if cwd else []
+    if focused and (focused in cwd_ids or not cwd_ids):
+        return focused
+    if len(cwd_ids) == 1:
+        return cwd_ids[0]
     return None
 
 
@@ -169,13 +181,8 @@ def build_line(event: dict, *, target: str = "Ghostty", resolve=True) -> str | N
     uuid: str | None = None
 
     if resolve and hook_event == "SessionStart":
-        try:
-            uuid = resolve_uuid_via_sentinel(session_id, target=target)
-        finally:
-            # Always clear the sentinel back to a friendly title, even if the
-            # lookup failed, so the user never sees the raw sentinel linger.
-            if label:
-                _write_title(label)
+        uuid = resolve_uuid(cwd, target=target)
+        _log(f"SessionStart {session_id[:8]} cwd={cwd!r} -> uuid={uuid!r}")
 
     payload = {
         "session_id": session_id,

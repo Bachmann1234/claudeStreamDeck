@@ -1,6 +1,7 @@
 {
   "//": "Merge this into ~/.claude/settings.json (or a project .claude/settings.json).",
-  "//command": "Replace /ABSOLUTE/PATH/.venv/bin/claudestreamdeck-hook with the real path — run `which claudestreamdeck-hook` inside the project venv. Every event points at the SAME reporter; it maps hook_event_name -> deck state itself. `async: true` + a short timeout guarantee the hook never blocks Claude.",
+  "//command": "Replace /ABSOLUTE/PATH/.venv/bin/claudestreamdeck-hook with the real path — run `which claudestreamdeck-hook` inside the project venv. Every event points at the SAME reporter; it maps hook_event_name -> deck state itself. `async: true` + a short timeout keep the hook from ever blocking Claude.",
+  "//SessionStart": "SessionStart is deliberately NOT async: it resolves the surface UUID via osascript and must run while the new window is still focused (see docs/correlation-rationale.md). It's fast (~one osascript round-trip).",
   "hooks": {
     "SessionStart": [
       {
@@ -9,7 +10,6 @@
           {
             "type": "command",
             "command": "/ABSOLUTE/PATH/.venv/bin/claudestreamdeck-hook",
-            "async": true,
             "timeout": 5
           }
         ]

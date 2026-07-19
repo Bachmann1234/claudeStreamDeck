@@ -8,103 +8,73 @@ from streamdeckd import hook
 from streamdeckd.protocol import parse_message
 
 
-# -- correlation: resolve_uuid_via_sentinel --------------------------------
+# -- correlation: resolve_uuid (focused + cwd, read-only osascript) ---------
 
 
-def test_resolve_returns_uuid_on_first_try():
-    titles = []
+def _fake_osascript(*, focused=None, cwd_ids=None, focused_error=False):
+    """A stand-in osascript that answers the two queries resolve_uuid makes.
 
-    def write_title(t):
-        titles.append(t)
-        return True
+    ``focused`` -> the focused-front-surface id (or None / raise). ``cwd_ids``
+    -> the surfaces the ``whose working directory is`` query returns.
+    """
+    cwd_ids = cwd_ids or []
 
-    def run_osascript(script):
-        # The sentinel that was written is embedded in the query script.
-        assert "sess-123" in script
-        return "U-RESOLVED"
+    def run(script):
+        if "focused terminal" in script:
+            if focused_error:
+                raise RuntimeError("no front window (-1728)")
+            return focused or ""
+        if "every terminal whose working directory" in script:
+            return ", ".join(cwd_ids)
+        return ""
 
-    uuid = hook.resolve_uuid_via_sentinel(
-        "sess-123",
-        write_title=write_title,
-        run_osascript=run_osascript,
-        sleep=lambda _s: None,
-    )
-    assert uuid == "U-RESOLVED"
-    assert titles == ["⟦gsm:sess-123⟧"]
+    return run
 
 
-def test_resolve_retries_until_title_lands():
-    calls = {"n": 0}
-
-    def run_osascript(script):
-        calls["n"] += 1
-        if calls["n"] < 3:
-            raise RuntimeError("Ghostty got an error: Can't get terminal (-1719)")
-        return "U-LATE"
-
-    uuid = hook.resolve_uuid_via_sentinel(
-        "s",
-        write_title=lambda _t: True,
-        run_osascript=run_osascript,
-        sleep=lambda _s: None,
-    )
-    assert uuid == "U-LATE"
-    assert calls["n"] == 3
+def test_resolve_returns_focused_when_it_matches_cwd():
+    # The common case: the new session's window is focused and matches cwd.
+    run = _fake_osascript(focused="U-NEW", cwd_ids=["U-NEW", "U-OTHER"])
+    assert hook.resolve_uuid("/w/repo", run_osascript=run) == "U-NEW"
 
 
-def test_resolve_gives_up_quietly():
-    def run_osascript(script):
-        raise RuntimeError("not authorized to send Apple events")
-
-    uuid = hook.resolve_uuid_via_sentinel(
-        "s",
-        write_title=lambda _t: True,
-        run_osascript=run_osascript,
-        sleep=lambda _s: None,
-        attempts=3,
-    )
-    assert uuid is None
+def test_resolve_trusts_focused_when_no_cwd_matches():
+    # Ghostty reports the cwd differently than Claude -> still trust focused.
+    run = _fake_osascript(focused="U-NEW", cwd_ids=[])
+    assert hook.resolve_uuid("/w/repo", run_osascript=run) == "U-NEW"
 
 
-def test_resolve_no_tty_returns_none():
-    # No controlling terminal -> can't set a title to look up -> bail.
-    called = {"osascript": False}
-
-    def run_osascript(script):
-        called["osascript"] = True
-        return "U"
-
-    uuid = hook.resolve_uuid_via_sentinel(
-        "s",
-        write_title=lambda _t: False,  # /dev/tty open failed
-        run_osascript=run_osascript,
-        sleep=lambda _s: None,
-    )
-    assert uuid is None
-    assert called["osascript"] is False
+def test_resolve_falls_back_to_unique_cwd_match():
+    # A different window is focused, but exactly one surface matches our cwd.
+    run = _fake_osascript(focused="U-SOMETHING-ELSE", cwd_ids=["U-ONLY"])
+    assert hook.resolve_uuid("/w/repo", run_osascript=run) == "U-ONLY"
 
 
-def test_resolve_uses_unique_sentinel_per_session():
-    seen = {}
+def test_resolve_ambiguous_cwd_without_focus_match_returns_none():
+    # Two surfaces share the cwd and neither is the focused one -> don't guess.
+    run = _fake_osascript(focused="U-ELSEWHERE", cwd_ids=["U-A", "U-B"])
+    assert hook.resolve_uuid("/w/repo", run_osascript=run) is None
 
-    def make_writer(store_key):
-        def write_title(t):
-            store_key.append(t)
-            return True
 
-        return write_title
+def test_resolve_no_front_window_uses_unique_cwd():
+    run = _fake_osascript(focused_error=True, cwd_ids=["U-ONLY"])
+    assert hook.resolve_uuid("/w/repo", run_osascript=run) == "U-ONLY"
 
-    a, b = [], []
-    hook.resolve_uuid_via_sentinel(
-        "aaa", write_title=make_writer(a), run_osascript=lambda s: "UA",
-        sleep=lambda _s: None,
-    )
-    hook.resolve_uuid_via_sentinel(
-        "bbb", write_title=make_writer(b), run_osascript=lambda s: "UB",
-        sleep=lambda _s: None,
-    )
-    assert a == ["⟦gsm:aaa⟧"] and b == ["⟦gsm:bbb⟧"]
-    assert a[0] != b[0]  # no cross-session collision
+
+def test_resolve_no_front_window_ambiguous_cwd_returns_none():
+    run = _fake_osascript(focused_error=True, cwd_ids=["U-A", "U-B"])
+    assert hook.resolve_uuid("/w/repo", run_osascript=run) is None
+
+
+def test_resolve_nothing_resolvable_returns_none():
+    run = _fake_osascript(focused_error=True, cwd_ids=[])
+    assert hook.resolve_uuid("/w/repo", run_osascript=run) is None
+
+
+def test_resolve_disambiguates_same_cwd_by_focus():
+    # The exact live scenario: two Claude sessions in the same repo; the one the
+    # user just started is focused -> we pick it, not its sibling.
+    run = _fake_osascript(focused="U-JUST-STARTED", cwd_ids=["U-SIBLING", "U-JUST-STARTED"])
+    assert hook.resolve_uuid("/code/app", run_osascript=run) == "U-JUST-STARTED"
 
 
 # -- build_line ------------------------------------------------------------

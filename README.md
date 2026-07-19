@@ -97,8 +97,9 @@ step toward the next.
   `~/.claudeStreamDeck/streamdeckd.sock`, newline-delimited JSON. Built in M2
   (`streamdeckd/daemon.py`).
 - ~~Which process sends the Apple events~~ **Decided: split.** The **hook**
-  resolves its own surface UUID once on `SessionStart` (title-sentinel trick —
-  see [`docs/correlation-rationale.md`](./docs/correlation-rationale.md)); the
+  resolves its own surface UUID once on `SessionStart` (focused-surface + cwd
+  cross-check over read-only `osascript` — see
+  [`docs/correlation-rationale.md`](./docs/correlation-rationale.md)); the
   **daemon** sends the focus event on a key press. The one-time TCC Automation
   grant therefore lands on both, each on first use.
 - ~~What to do when there are more than 15 concurrent sessions~~ **Decided:

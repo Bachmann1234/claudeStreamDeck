@@ -113,9 +113,12 @@ needs you, green when done, and blank when you exit.
 
 ## 6. Session ↔ surface correlation & the one-time macOS grant
 
-On `SessionStart` the hook resolves its own Ghostty surface UUID (via a title
-sentinel — full rationale in [`correlation-rationale.md`](./correlation-rationale.md))
-and reports it, so a key press can focus the exact surface. Two things to know:
+On `SessionStart` the hook resolves its own Ghostty surface UUID (via read-only
+`osascript` — the focused surface, cross-checked against cwd; full rationale in
+[`correlation-rationale.md`](./correlation-rationale.md)) and reports it, so a
+key press can focus the exact surface. The `SessionStart` hook is wired
+**synchronously** (no `async`) so it queries while your new window is still
+focused. Two things to know:
 
 - **Automation (TCC) prompt.** The first Apple event each process sends triggers
   a one-time macOS "allow control of Ghostty" prompt — once for the hook (at the
@@ -167,9 +170,12 @@ launchctl unload ~/Library/LaunchAgents/com.claudestreamdeck.streamdeckd.plist
 - **Keys never change.** Is the daemon running and pointed at the same socket as
   the hook? Check `STREAMDECKD_SOCKET`/`GSM_HOME` match on both sides. Run
   `streamdeckd -v` and watch the log as you send a line.
-- **Keys light up but pressing does nothing.** The session had no resolved UUID
-  (grep `snapshot.json` for `"uuid"` via the registry, or run `gsm status`).
-  Usually the Automation grant for the hook is missing, or Ghostty wasn't
-  running when the session started. Focus works once a UUID is known.
+- **Keys light up but pressing does nothing.** The session had no resolved UUID.
+  Check `~/.claudeStreamDeck/hook.log` — it records each `SessionStart`
+  resolution (`… -> uuid='…'` on success, `-> uuid=None` on a miss) — and
+  `~/.claudeStreamDeck/registry.json` for the stored mapping. A `None` usually
+  means the Automation grant for the hook is missing, or the session was started
+  in a non-focused window with another same-cwd session open (see
+  `docs/correlation-rationale.md`). Focus works once a UUID is known.
 - **`AF_UNIX path too long`.** The socket path exceeds macOS's 104-byte limit —
   keep `GSM_HOME` short.

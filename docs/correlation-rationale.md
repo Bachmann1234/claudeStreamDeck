@@ -9,103 +9,96 @@ the Ghostty surface share a terminal, but stock **Ghostty 1.3.1 exposes no
 So the plan's original mechanism (`first terminal whose tty is "/dev/ttysNNN"`)
 **cannot work on the shipped release**. We had to pick a different bridge.
 
+> **Two hard constraints, one found empirically (2026-07-19 live test):**
+> 1. Ghostty 1.3.1 has **no `tty`/`pid`** in its scripting dictionary.
+> 2. Claude Code runs hooks with **no controlling terminal** — `open("/dev/tty")`
+>    fails with *"Device not configured"*. So a hook **cannot write to its own
+>    terminal** (no OSC escapes), only read Ghostty state via `osascript`.
+> What *does* work from a hook: **read-only `osascript`** against Ghostty
+> (TCC-permitting). The chosen design uses only that.
+
 ## Candidates evaluated
 
 ### A. tty matching (the plan's original) — ❌ blocked
-`ps -o tty= -p $PPID` → `/dev/ttysNNN`, then
-`first terminal whose tty is …`. Clean and unique **if Ghostty exposed `tty`**.
-It doesn't on 1.3.1; the query errors out. We still *emit* the tty in every
-message (cheap, useful diagnostics) so this lights up for free on a future
-Ghostty that adds the property — but it can't be the mechanism today.
+`ps -o tty= -p $PPID` → `/dev/ttysNNN`, then `first terminal whose tty is …`.
+Clean and unique **if Ghostty exposed `tty`**. It doesn't on 1.3.1. We still
+emit the (best-effort) tty in messages so it lights up for free on a future
+Ghostty, but it can't be the mechanism today.
 
-### B. cwd matching — ❌ not unique
-`first terminal whose working directory is "<cwd>"`. The property exists, but
-**two Claude sessions open in the same repo collide**, and cwd changes as you
-`cd` around, so a later re-resolve can match the wrong surface. Fine as a
-last-ditch fallback, unacceptable as the primary key. (The daemon still carries
-`cwd` and could offer a `--resolve-by-cwd` mode, but it's off the hot path.)
+### B. OSC title-sentinel self-resolution — ❌ blocked by constraint 2
+The *original* choice: on `SessionStart` the hook writes a unique title sentinel
+to its own terminal via an OSC 2 escape, then asks Ghostty for the surface whose
+`name` contains it. Elegant — the set-and-read live in one process and the
+sentinel is unique per session. **But it needs a writable controlling terminal,
+and hooks don't have one** (constraint 2, found the first time we ran it live:
+the sentinel was never written, so nothing resolved). Dead in this environment.
 
-### C. Manager-spawns-everything — ❌ too restrictive
-If the manager spawns every session with `gsm spawn`, it captures the UUID
-directly from `new window` — no correlation needed (this already works, see the
-findings doc). But it only covers sessions *the manager launched*. Any session
-you started yourself (the overwhelmingly common case — you open Ghostty and type
-`claude`) is invisible. A session manager that can't see sessions it didn't
-spawn isn't the tool we're building.
+### C. cwd matching alone — ❌ not unique
+`first terminal whose working directory is "<cwd>"`. The property exists and the
+query works from a hook, but **two Claude sessions in the same repo collide** —
+confirmed live: both open surfaces reported the identical `working directory`.
+Unusable on its own; but it's a strong *disambiguation input* (see E).
 
-### D. Title-sentinel self-resolution — ✅ chosen
-On `SessionStart`, the hook — running **inside the target surface** — writes a
-**unique title sentinel** to its own controlling terminal via an OSC 2 escape
-(`ESC ] 2 ; ⟦gsm:<session_id>⟧ BEL` → `/dev/tty`), then asks Ghostty:
+### D. Manager-spawns-everything — ❌ too restrictive
+Spawning every session captures the UUID from `new window` with no correlation,
+but only covers sessions the manager launched — not the common case of typing
+`claude` in a terminal you opened yourself.
 
-```applescript
-tell application "Ghostty" to get id of ¬
-  (first terminal whose name contains "⟦gsm:<session_id>⟧")
-```
+### E. Focused-surface + cwd cross-check — ✅ chosen
+On `SessionStart` (wired **synchronously**, so it runs while the new window is
+still frontmost) the hook, using only read-only `osascript`:
 
-The returned `id` is this session's surface UUID. The hook reports
-`(session_id, uuid)` to the daemon, which just stores the mapping — **no
-AppleScript in the daemon's hot path at all.** Finally the hook rewrites the
-title to a friendly label (the repo basename) so the sentinel never lingers.
+1. reads the **focused front surface** — `id of focused terminal of selected
+   tab of front window`;
+2. reads the surfaces whose **`working directory`** equals the session `cwd`;
+3. returns the focused id when it also matches cwd (or when Ghostty reports no
+   cwd matches at all); else a *unique* cwd match; else **`None`** (won't guess).
 
-## Why D wins — and how it contains the race
+The hook reports `(session_id, uuid)`; the daemon stores it. No AppleScript in
+the daemon's hot path.
 
-Setting a title then reading it back is inherently racy: another process could
-overwrite the title in between, or the terminal could match a *stale* value. The
-sentinel design defuses both:
+## Why E wins
 
-1. **The set and the read live in one process.** The hook writes the sentinel
-   and immediately queries for it — the window between the two is microseconds
-   of the hook's own execution, not a cross-process handoff. Nothing schedules a
-   title change into that gap under normal use.
-2. **The sentinel is globally unique** (it embeds `session_id`). Even if ten
-   sessions call `SessionStart` at the same instant, each writes a *different*
-   sentinel, so `name contains "⟦gsm:<mine>⟧"` matches **only that session's own
-   surface** — never a sibling's. This is the property cwd matching lacks.
-3. **Latency is absorbed by a short retry loop.** Ghostty needs a beat to
-   process the escape and update `name`; the resolver polls a handful of times
-   (~50 ms apart) before giving up. Terminal title updates are effectively
-   instant, so this converges on the first or second try in practice.
-4. **It degrades quietly.** No controlling tty, Ghostty not scriptable, or TCC
-   not yet granted → the resolver returns `None`, the hook reports without a
-   UUID, and the daemon still allocates and paints the key. Only *focus* is
-   unavailable until a UUID is known; the deck is never wrong, just incomplete.
-   (A future daemon-side re-resolve by cwd could fill the gap.)
-
-Two further points in D's favor:
-
-- **The daemon stays AppleScript-free on the hot path.** Correlation cost is
-  paid once, in the hook, at session start — not on every key press and not in
-  the daemon's poll loop (which the plan caps at 1–2 Hz for Apple-event
-  latency). The daemon only calls AppleScript when you actually *press a key*.
-- **The TCC grant lands on the right process.** The Apple event that resolves
-  the UUID is sent by the hook (a child of the Claude Code process in the
-  terminal). The one that *focuses* is sent by the daemon. Both are the user's
-  own processes; the one-time Automation prompt is expected on first use of
-  each. See [`setup.md`](./setup.md).
+- **It only uses the channel that actually works from a hook** — read-only
+  `osascript`. No `/dev/tty`, no title writes.
+- **It disambiguates the same-cwd collision.** At `SessionStart` the window the
+  user just typed `claude` into *is the focused one*; cwd matching alone can't
+  tell two same-repo sessions apart, but "focused **and** matches cwd" can.
+  Verified live: with two sessions in the identical repo, it bound the
+  newly-started (focused) surface, not its sibling.
+- **Synchronous timing makes "focused" reliable.** The `SessionStart` hook is
+  wired without `async`, so it queries before focus can wander. (Other events
+  stay `async` — they carry no correlation and must never block Claude.)
+- **It never binds the wrong window.** Anything ambiguous returns `None`: the
+  session still gets a key and paints correctly; only *focus* waits until a
+  future re-resolve. A missing binding is a safe failure; a wrong one isn't.
+- **Daemon stays AppleScript-free on the hot path.** Correlation is paid once,
+  in the hook, at session start. The daemon calls `osascript` only on an actual
+  key press.
 
 ## Where this lives in the code
 
-- `streamdeckd/hook.py :: resolve_uuid_via_sentinel` — the set-title-then-query
-  resolver, with `write_title` / `run_osascript` / `sleep` injected so it's unit
-  tested with zero real terminals or osascript (`tests/test_hook.py`).
-- `streamdeckd/hook.py :: build_line` — assembles the reported message; only
-  `SessionStart` pays the resolution cost, other events are a bare
-  `(session_id, state)`.
-- `streamdeckd/daemon.py :: Daemon._mirror_registry` — stores the hook-resolved
+- `streamdeckd/hook.py :: resolve_uuid` — the focused+cwd resolver, with
+  `run_osascript` injected so it's unit-tested with no real Ghostty
+  (`tests/test_hook.py`); logs each `SessionStart` outcome to
+  `~/.claudeStreamDeck/hook.log`.
+- `streamdeckd/hook.py :: build_line` — only `SessionStart` pays the resolution
+  cost; other events are a bare `(session_id, state)`.
+- `streamdeckd/daemon.py :: Daemon._mirror_registry` — stores the resolved
   `session_id → uuid` in the gsm `Registry` via `Manager.bind`, so a press goes
-  straight to `Manager.focus` (which already prunes a dead surface).
+  straight to `Manager.focus` (which prunes a dead surface).
+- `.claude/settings.local.json` / `hooks/settings.snippet.json` — `SessionStart`
+  is intentionally **not** `async`, for the timing guarantee above.
 
 ## Residual risks / future work
 
-- **Claude Code owning the title.** If a future Claude Code build continuously
-  rewrites the terminal title, it could clobber the sentinel before the query
-  lands. Mitigation if that appears: shrink the retry delay, or have the hook
-  hold the sentinel across a couple of query attempts before restoring. Not
-  observed today.
-- **UUIDs die with the Ghostty process.** After a Ghostty restart every UUID is
-  stale. Re-resolution happens naturally on the next `SessionStart` (e.g. a
-  `--resume`); the daemon prunes the dead mapping on the first failed focus.
-- **When Ghostty ships `tty`.** Candidate A becomes viable and is arguably
-  cleaner (no title flicker at all). The tty is already on the wire, so the
-  daemon could prefer it with no hook change.
+- **Starting a session in a non-focused window.** If you launch `claude` in a
+  background Ghostty window and there are ≥2 same-cwd surfaces, step 3 returns
+  `None` (no wrong bind). Recovery: a manual `gsm adopt <tag> --uuid …`, or a
+  future daemon-side re-resolve. The single-session and distinct-cwd cases are
+  unaffected.
+- **UUIDs die with the Ghostty process.** After a restart every UUID is stale;
+  the daemon prunes on the first failed focus and re-resolves on the session's
+  next `SessionStart`.
+- **When Ghostty ships `tty`.** Candidate A becomes viable and needs no title
+  write — arguably the cleanest of all. The tty is already on the wire.
