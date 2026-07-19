@@ -18,29 +18,41 @@ Relevant events:
 - `SessionEnd` — release the key.
 
 ## Tasks
-- [ ] Write one small reporter script (e.g. `hooks/report.py` or a shell script)
+- [x] Write one small reporter script (`streamdeckd/hook.py`, exposed as the
+      `claudestreamdeck-hook` console script — one script wired to every event)
       that:
-  - [ ] Reads the event JSON from stdin.
-  - [ ] Extracts `session_id`, cwd (for a human label), and the session's
+  - [x] Reads the event JSON from stdin.
+  - [x] Extracts `session_id`, cwd (for a human label), and the session's
         **`tty`** (see below).
-  - [ ] Maps the triggering event → state.
-  - [ ] Writes one JSON line to the daemon's unix socket. Must be fast and
+  - [x] Maps the triggering event → state (`hook_event_name` → state).
+  - [x] Writes one JSON line to the daemon's unix socket. Must be fast and
         **never block Claude** — fire-and-forget, short timeout, swallow errors.
-- [ ] Determine the `tty` from inside the hook. This is the correlation key the
-      daemon uses to resolve the session's Ghostty surface UUID over AppleScript
-      (`first terminal whose tty is "/dev/ttysNNN"` — see M4 and
-      [`../ghostty-focus-plan.md`](../ghostty-focus-plan.md) §3). Get it via:
-  - `tty` command, or `ps -o tty= -p $PPID`, normalized to `/dev/ttysNNN`.
-  - Report it on **`SessionStart`** (so the daemon can resolve the UUID once and
-    cache `session_id → uuid`); other events only need `session_id` + `state`.
-- [ ] Add hook config to settings.json mapping each event → the reporter script.
+        *`send_line` uses a 0.25 s timeout and returns `False` on any error;
+        `main()` always exits 0. Hooks are also wired `async` in settings.*
+- [x] Determine the `tty` from inside the hook — reported best-effort via
+      `os.ttyname(/dev/tty)`. **But 1.3.1 exposes no `tty`, so tty is not the
+      correlation key.** Instead the hook resolves the surface **UUID itself** on
+      `SessionStart` via an OSC title sentinel and reports `(session_id, uuid)`;
+      the daemon caches it directly. Full evaluation of tty vs. cwd vs.
+      manager-spawns vs. sentinel in
+      [`../docs/correlation-rationale.md`](../docs/correlation-rationale.md).
+  - [x] Report it on **`SessionStart`**; other events send only
+        `session_id` + `state`.
+- [x] Add hook config to settings.json mapping each event → the reporter script.
+      *Provided as [`../hooks/settings.snippet.json`](../hooks/settings.snippet.json);
+      wiring documented in `docs/setup.md §5`.*
 - [ ] Verify: start a session, watch keys change as you prompt / get asked /
-      finish / exit.
+      finish / exit. *Not run live in this session (the destructive-test hazard
+      in CLAUDE.md — spawning/closing real Ghostty sessions is risky, and this
+      was an unattended run). Verified instead via the full unit suite + a
+      real-socket integration test + the manual `nc -U` recipe. Live smoke test
+      is the one remaining human step — see `docs/setup.md §5`.*
 
 ## Done when
 - Real Claude Code activity drives the deck live: a fresh session lights a key,
   it goes blue while working, yellow when it needs you, green when done, blank
-  on exit.
+  on exit. *Wiring + daemon proven headless; the live confirmation is the open
+  checkbox above.*
 
 ## Gotchas
 - Hooks run for *every* session — the reporter must be idempotent and cheap.

@@ -1,0 +1,81 @@
+{
+  "//": "Merge this into ~/.claude/settings.json (or a project .claude/settings.json).",
+  "//command": "Replace /ABSOLUTE/PATH/.venv/bin/claudestreamdeck-hook with the real path — run `which claudestreamdeck-hook` inside the project venv. Every event points at the SAME reporter; it maps hook_event_name -> deck state itself. `async: true` + a short timeout guarantee the hook never blocks Claude.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/ABSOLUTE/PATH/.venv/bin/claudestreamdeck-hook",
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/ABSOLUTE/PATH/.venv/bin/claudestreamdeck-hook",
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/ABSOLUTE/PATH/.venv/bin/claudestreamdeck-hook",
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/ABSOLUTE/PATH/.venv/bin/claudestreamdeck-hook",
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/ABSOLUTE/PATH/.venv/bin/claudestreamdeck-hook",
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/ABSOLUTE/PATH/.venv/bin/claudestreamdeck-hook",
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

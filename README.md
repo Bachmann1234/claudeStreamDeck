@@ -93,11 +93,19 @@ step toward the next.
   scopes is now an **optional stretch track**, not required for the core tool.
 
 ## Open questions / decisions to revisit
-- Transport between hooks and daemon: unix socket vs. watched JSON dir vs. tiny
-  local HTTP endpoint. (Leaning unix socket — simple, local, no ports.)
-- What to do when there are more than 15 concurrent sessions (paging? LRU evict a
-  finished session's key?).
+- ~~Transport between hooks and daemon~~ **Decided: unix socket** at
+  `~/.claudeStreamDeck/streamdeckd.sock`, newline-delimited JSON. Built in M2
+  (`streamdeckd/daemon.py`).
+- ~~Which process sends the Apple events~~ **Decided: split.** The **hook**
+  resolves its own surface UUID once on `SessionStart` (title-sentinel trick —
+  see [`docs/correlation-rationale.md`](./docs/correlation-rationale.md)); the
+  **daemon** sends the focus event on a key press. The one-time TCC Automation
+  grant therefore lands on both, each on first use.
+- What to do when there are more than 15 concurrent sessions. **Current
+  behavior:** the 16th session is tracked but gets no key (logged as
+  `overflow`); a key frees up only when some session ends (no auto-reassign
+  yet). Paging / LRU-evict is still open (M5).
 - Whether to depend on tmux for session survival across Ghostty restarts, or
-  accept that a UUID (and its key) dies with the surface.
-- Which process sends the Apple events (the Python daemon directly vs. a helper)
-  — determines where the one-time TCC Automation grant lands.
+  accept that a UUID (and its key) dies with the surface. **Still open** — today
+  the daemon prunes a dead mapping on the first failed focus and re-resolves on
+  the session's next `SessionStart`.
