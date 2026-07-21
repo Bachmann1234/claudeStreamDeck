@@ -86,20 +86,34 @@ With a resolved uuid from #2:
       `launchctl load ~/Library/LaunchAgents/com.claudestreamdeck.streamdeckd.plist`
       (full steps in `docs/setup.md §9`).
 
-## 6. Hardware bring-up (M1) — needs the Stream Deck plugged in ⏱️ ~30 min
+## 6. Hardware bring-up (M1) — ✅ DONE 2026-07-21
 
-Everything above uses the VirtualDeck; this lights up the real board.
+Everything above uses the VirtualDeck; this lit up the real board.
 
-- [ ] **Quit the Elgato Stream Deck app** (it grabs the USB device exclusively).
-- [ ] `brew install hidapi`, then `pip install streamdeck` into the venv.
-- [ ] Grant **Input Monitoring** to the terminal/daemon if macOS asks.
-- [ ] Run the M1 smoke script (enumerate deck → expect model 20GAA9902, 15 keys →
-      set brightness → paint key 0 → print press callbacks). See
+- [x] **Quit the Elgato Stream Deck app** (it grabs the USB device exclusively).
+- [x] `brew install hidapi` (already present, 0.15.0), `pip install streamdeck`
+      (0.9.8) into the venv.
+- [x] No Input-Monitoring grant was needed — HID access worked immediately.
+- [x] Ran the M1 smoke script: enumerated **Stream Deck Original**, 15 keys,
+      serial `AL50I2C01764`, fw `1.02.004`, format 72×72 JPEG flip-both; set
+      brightness; painted keys; all presses printed. See
       `milestones/M1-hardware-smoke-test.md`.
-- [ ] Once the deck enumerates, I'll build a `StreamDeckRenderer` behind the
-      existing `Renderer` interface (formats the same `KeyAppearance` frames with
-      PILHelper, wires HID key-press → `Daemon.press`). The daemon needs **zero**
-      changes — just swap `VirtualDeck` for `StreamDeckRenderer` in `cli.py`.
+- [x] Built `StreamDeckRenderer` behind the existing `Renderer` interface
+      (`streamdeckd/streamdeck_renderer.py` — formats `KeyAppearance` frames via
+      PILHelper, change-detects to skip redundant USB writes, wires HID
+      key-press → `Daemon.press`). The daemon needed **zero** changes; `cli.py`
+      gained a `--deck` flag that swaps `VirtualDeck` for it. Unit-tested against
+      a `FakeDeck` (9 tests) and verified live end-to-end (state lifecycle +
+      physical press reached the daemon).
+
+### Remaining hardware polish (optional, deck-in-hand)
+- [ ] **Labels on keys:** the model carries a per-session `label` but nothing
+      sets it yet — keys currently show only color. Decide what to paint (repo
+      basename? branch? a digit?) and have the hook/model populate it.
+- [ ] **Animation:** ATTENTION renders as a *static* white ring (no tick loop).
+      If you want it to actually pulse, see the animation decision below.
+- [ ] **Auto-detect at startup:** `cli.py` uses `--deck` opt-in. Could instead
+      try `StreamDeckRenderer.open_first()` and fall back to VirtualDeck.
 
 ---
 
@@ -111,8 +125,8 @@ Everything above uses the VirtualDeck; this lights up the real board.
 - [ ] **tmux for session survival:** UUIDs die when Ghostty restarts. Accept that
       (keys just re-resolve on the next session), or run sessions under tmux so
       they survive? (README open question.)
-- [ ] **Build the `StreamDeckRenderer` now** as an untested-pending-hardware
-      skeleton, or wait until the deck is in front of us at step 6?
+- [x] ~~**Build the `StreamDeckRenderer` now**~~ **Done** — built and validated
+      live against the real board (2026-07-21).
 - [ ] **Config file (M5 backlog):** move colors / Ghostty app name / socket path /
       overflow strategy into a config file, or keep them as CLI flags + env vars?
 

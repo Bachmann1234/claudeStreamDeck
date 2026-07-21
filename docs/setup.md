@@ -30,6 +30,8 @@ Useful flags:
 | Flag              | Default                                   | Purpose                                  |
 |-------------------|-------------------------------------------|------------------------------------------|
 | `--socket PATH`   | `~/.claudeStreamDeck/streamdeckd.sock`    | where hooks connect                      |
+| `--deck`          | off                                       | drive a **real Stream Deck** over USB (see §2a) |
+| `--brightness N`  | `60`                                      | physical deck brightness % (`--deck` only) |
 | `--out-dir DIR`   | `~/.claudeStreamDeck/virtualdeck`         | where the virtual deck is written        |
 | `--keys N`        | `15`                                      | key count (the 20GAA9902 is a 3×5 = 15)  |
 | `--no-png`        | off                                       | write only `snapshot.json`, skip PNGs    |
@@ -38,6 +40,33 @@ Useful flags:
 
 The daemon refuses to start if another instance is already listening on the
 socket, and cleans up a stale socket file left by a crash.
+
+## 2a. Drive a real Stream Deck (`--deck`)
+
+The default is the virtual deck; `--deck` paints the physical board instead.
+The daemon logic is identical — only the `Renderer` swaps.
+
+```bash
+# 1. Quit the Elgato Stream Deck app first — it holds the USB device
+#    exclusively and the daemon will find no deck while it runs.
+# 2. Install the HID bits (one time):
+brew install hidapi
+pip install streamdeck            # into the project venv
+
+streamdeckd --deck -v             # opens the attached deck, paints keys,
+                                  # forwards physical presses to focus
+```
+
+- `--keys` is ignored under `--deck` (the count comes from the device).
+- A **physical key press** takes the exact same path as `{"press": N}` on the
+  socket: it focuses that session's Ghostty surface (needs a resolved UUID —
+  see §6). No extra wiring.
+- Hardware notes for the tested board (Stream Deck Original, 15-key): keys are
+  **72×72 JPEG, flipped both axes** — handled automatically by the library's
+  `PILHelper`, so nothing downstream hard-codes the size. Presses did **not**
+  require an Input-Monitoring grant on the test machine.
+- If it prints `could not open Stream Deck: no Stream Deck found`, the Elgato
+  app is probably still running, or the deck is unplugged.
 
 ## 3. Watch the virtual deck
 

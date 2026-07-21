@@ -33,6 +33,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--keys", type=int, default=15, help="number of keys (default 15)")
     p.add_argument(
+        "--deck",
+        action="store_true",
+        help="drive a real Stream Deck over USB HID instead of the virtual deck "
+        "(quit the Elgato app first; --keys is ignored, taken from the device)",
+    )
+    p.add_argument(
+        "--brightness",
+        type=int,
+        default=60,
+        help="physical deck brightness percent (--deck only, default 60)",
+    )
+    p.add_argument(
         "--out-dir",
         default=None,
         help=f"virtual-deck output dir (default: {default_virtualdeck_dir()})",
@@ -58,17 +70,32 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    out_dir = args.out_dir if args.out_dir is not None else default_virtualdeck_dir()
-    renderer = VirtualDeck(
-        key_count=args.keys,
-        out_dir=out_dir,
-        write_png=not args.no_png,
-    )
+    log = logging.getLogger("streamdeckd")
+    if args.deck:
+        from .streamdeck_renderer import StreamDeckRenderer
+
+        try:
+            renderer = StreamDeckRenderer.open_first(brightness=args.brightness)
+        except Exception as e:
+            log.error("could not open Stream Deck: %s", e)
+            return 1
+    else:
+        out_dir = (
+            args.out_dir if args.out_dir is not None else default_virtualdeck_dir()
+        )
+        renderer = VirtualDeck(
+            key_count=args.keys,
+            out_dir=out_dir,
+            write_png=not args.no_png,
+        )
     daemon = Daemon(
         manager=Manager(ghostty=Ghostty(args.target)),
         renderer=renderer,
         socket_path=args.socket,
     )
+    # A physical press must reach the same focus path as {"press": N}.
+    if args.deck:
+        renderer.on_press = daemon.press
     try:
         daemon.serve_forever()
     except KeyboardInterrupt:  # pragma: no cover

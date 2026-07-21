@@ -26,6 +26,63 @@ class FakeGhostty:
         self.live.discard(uuid)
 
 
+class FakeDeck:
+    """A hardware-free stand-in for a ``streamdeck`` device.
+
+    Implements only the surface :class:`StreamDeckRenderer` touches. Reports the
+    real Stream Deck Original image format so ``PILHelper`` formats images
+    exactly as it would for the physical board (72×72 JPEG, flip both), without
+    any USB access. ``set_key_image`` just records the native bytes per key.
+    """
+
+    ORIGINAL_FORMAT = {
+        "size": (72, 72),
+        "format": "JPEG",
+        "flip": (True, True),
+        "rotation": 0,
+    }
+
+    def __init__(self, keys: int = 15):
+        self._keys = keys
+        self.images: dict[int, bytes] = {}
+        self.brightness: int | None = None
+        self.callback = None
+        self.reset_count = 0
+        self.closed = False
+
+    # -- streamdeck device API (subset) ------------------------------------
+    def key_count(self) -> int:
+        return self._keys
+
+    def key_image_format(self) -> dict:
+        return dict(self.ORIGINAL_FORMAT)
+
+    def deck_type(self) -> str:
+        return "Stream Deck Original (fake)"
+
+    def set_brightness(self, pct: int) -> None:
+        self.brightness = pct
+
+    def set_key_callback(self, cb) -> None:
+        self.callback = cb
+
+    def set_key_image(self, key: int, image: bytes) -> None:
+        self.images[key] = image
+
+    def reset(self) -> None:
+        self.reset_count += 1
+
+    def close(self) -> None:
+        self.closed = True
+
+    # -- test helper -------------------------------------------------------
+    def press(self, key: int) -> None:
+        """Simulate a physical down+up press through the registered callback."""
+        if self.callback:
+            self.callback(self, key, True)
+            self.callback(self, key, False)
+
+
 class RecordingRenderer:
     """Renderer that keeps every frame it was asked to paint."""
 
