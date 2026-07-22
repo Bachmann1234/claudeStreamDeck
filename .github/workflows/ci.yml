@@ -18,5 +18,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e '.[dev]'
+      # `deck` pulls in the pure-Python streamdeck lib so the hardware-renderer
+      # tests run (they only fake the USB device, not the image formatting).
+      - run: pip install -e '.[dev,deck]'
       - run: pytest

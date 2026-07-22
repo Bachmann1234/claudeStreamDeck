@@ -7,6 +7,13 @@ press-forwarding logic that runs on the physical board.
 
 from __future__ import annotations
 
+import pytest
+
+# PILHelper comes from the optional `streamdeck` library (the `deck` extra) —
+# without it these tests can't format native images, so skip rather than fail
+# on a headless install that never touches hardware.
+pytest.importorskip("StreamDeck")
+
 from fakes import FakeDeck
 
 from streamdeckd.state import KeyState, appearance_for
