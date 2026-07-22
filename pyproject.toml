@@ -26,3 +26,6 @@ packages = ["gsm", "streamdeckd"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The whole suite runs in seconds; if any test blocks this long, dump every
+# thread's stack so a CI hang is diagnosable instead of a silent spin.
+faulthandler_timeout = 60
