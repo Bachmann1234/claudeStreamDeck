@@ -402,6 +402,16 @@ class SessionModel:
         action = "updated" if existing.key_index is not None else "overflow"
         return ApplyResult(slot=existing, action=action)
 
+    def force_state(self, session_id: str, state: KeyState) -> bool:
+        """Set a tracked session's state directly (e.g. the daemon's watchdog
+        downgrading a stuck WORKING key to DONE). Returns whether it changed."""
+        slot = self._slots.get(session_id)
+        if slot is None or slot.state == state:
+            return False
+        slot.state = state
+        self._bump(slot)
+        return True
+
     def remove(self, session_id: str) -> Slot | None:
         """Drop a session (e.g. its surface died on focus). Frees + promotes."""
         slot = self._slots.pop(session_id, None)

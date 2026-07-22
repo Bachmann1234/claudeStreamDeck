@@ -64,6 +64,7 @@ class Daemon:
         launch_cwd: str | None = None,
         reap: bool = True,
         reap_interval: float = 8.0,
+        working_timeout: float = 60.0,
     ):
         self.manager = manager or Manager()
         self.renderer = renderer or VirtualDeck()
@@ -100,6 +101,11 @@ class Daemon:
         self._reap_interval = reap_interval
         self._reap_stop = threading.Event()
         self._reap_thread: threading.Thread | None = None
+        # Watchdog: a user *interrupt* fires no hook, so a WORKING key would spin
+        # forever. If a session sees no activity for this long, drop it to DONE.
+        # 0 disables. Monotonic last-activity per session, stamped in handle_line.
+        self._working_timeout = working_timeout
+        self._activity: dict[str, float] = {}
 
     # -- message handling --------------------------------------------------
 
@@ -128,6 +134,7 @@ class Daemon:
 
         with self._lock:
             result = self.model.apply(msg)
+            self._activity[msg.session_id] = time.monotonic()  # for the watchdog
             self._mirror_registry(result)
             self._repaint()
         log.info(
@@ -255,28 +262,61 @@ class Daemon:
             log.info("reaper: blanked %d key(s) whose surfaces are gone", len(dead))
         return len(dead)
 
+    def _downgrade_stale_working(self) -> int:
+        """Drop any WORKING key with no activity for ``working_timeout`` to DONE.
+        This is the only cleanup for a user *interrupt*, which fires no hook.
+        Returns how many keys were downgraded."""
+        if not self._working_timeout:
+            return 0
+        now = time.monotonic()
+        changed = []
+        with self._lock:
+            for slot in self.model.slots():
+                if slot.state is KeyState.WORKING:
+                    last = self._activity.get(slot.session_id, self._started_at)
+                    if now - last > self._working_timeout and self.model.force_state(
+                        slot.session_id, KeyState.DONE
+                    ):
+                        changed.append(slot.session_id)
+            if changed:
+                self._repaint()
+        if changed:
+            log.info("watchdog: %d stale 'working' key(s) -> done (idle > %.0fs)",
+                     len(changed), self._working_timeout)
+        return len(changed)
+
     def _reconcile_loop(self) -> None:
-        """Background reaper tick. Only queries Ghostty when at least one key is
-        bound to a UUID — an idle deck costs nothing."""
+        """Background maintenance tick: the working-state watchdog, then the
+        dead-surface reaper. Only queries Ghostty when a key is bound to a UUID —
+        an idle deck costs nothing."""
         while not self._reap_stop.wait(self._reap_interval):
             try:
-                with self._lock:
-                    has_bound = any(s.uuid for s in self.model.slots())
-                if has_bound:
-                    self._reap_dead_surfaces()
+                self._downgrade_stale_working()
+                if self._reap:
+                    with self._lock:
+                        has_bound = any(s.uuid for s in self.model.slots())
+                    if has_bound:
+                        self._reap_dead_surfaces()
             except Exception:  # pragma: no cover - a hiccup must not kill the loop
-                log.exception("reaper tick failed")
+                log.exception("maintenance tick failed")
 
     def _start_reaper(self) -> None:
-        if not self._reap or self._reap_thread is not None:
+        if self._reap_thread is not None:
             return
+        if not self._reap and not self._working_timeout:
+            return  # nothing for the maintenance loop to do
         self._reap_stop.clear()
         self._reap_thread = threading.Thread(
-            target=self._reconcile_loop, name="streamdeckd-reaper", daemon=True
+            target=self._reconcile_loop, name="streamdeckd-maintenance", daemon=True
         )
         self._reap_thread.start()
-        log.info("reaper started (blanks keys for closed surfaces every %.0fs)",
-                 self._reap_interval)
+        bits = []
+        if self._working_timeout:
+            bits.append(f"idle 'working' -> done after {self._working_timeout:.0f}s")
+        if self._reap:
+            bits.append("blank keys for closed surfaces")
+        log.info("maintenance started (%s; every %.0fs)",
+                 ", ".join(bits), self._reap_interval)
 
     def _stop_reaper(self) -> None:
         self._reap_stop.set()

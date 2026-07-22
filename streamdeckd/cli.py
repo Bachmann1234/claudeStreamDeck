@@ -87,6 +87,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="don't auto-blank keys whose Ghostty surfaces have been closed",
     )
     p.add_argument(
+        "--working-timeout",
+        type=float,
+        default=60.0,
+        help="drop a 'working' key to 'done' after this many idle seconds — the "
+        "only cleanup for a user interrupt, which fires no hook (0 disables)",
+    )
+    p.add_argument(
         "--out-dir",
         default=None,
         help=f"virtual-deck output dir (default: {default_virtualdeck_dir()})",
@@ -158,6 +165,7 @@ def main(argv: list[str] | None = None) -> int:
         launch_command=args.launch_command,
         launch_cwd=args.launch_cwd,
         reap=not args.no_reap,
+        working_timeout=args.working_timeout,
     )
     # A physical press must reach the same focus path as {"press": N}.
     if hasattr(renderer, "on_press"):

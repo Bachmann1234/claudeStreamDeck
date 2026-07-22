@@ -186,7 +186,32 @@ def _label_from(event: dict) -> str | None:
     return None
 
 
-def _state_value(hook_event: str | None) -> str | None:
+# A `Notification` fires for very different reasons (Claude's `notification_type`
+# field). Only some mean "the human is needed"; an idle prompt just means Claude
+# finished and is waiting — mapping *that* to ATTENTION was lighting a false "?".
+_ATTENTION_NOTIFS = frozenset(
+    {"permission_prompt", "agent_needs_input", "elicitation_dialog"}
+)
+_DONE_NOTIFS = frozenset({"idle_prompt", "agent_completed"})
+
+
+def _notification_state(notification_type: str | None) -> str | None:
+    """Map a `Notification`'s ``notification_type`` to a deck state, or ``None``
+    to leave the key unchanged (transient/info notifications)."""
+    ntype = (notification_type or "").strip()
+    if not ntype:
+        return KeyState.ATTENTION.value  # unknown/old CC: assume it needs you
+    if ntype in _DONE_NOTIFS:
+        return KeyState.DONE.value
+    if ntype in _ATTENTION_NOTIFS:
+        return KeyState.ATTENTION.value
+    return None  # e.g. auth_success / elicitation_complete -> no state change
+
+
+def _state_value(event: dict) -> str | None:
+    hook_event = event.get("hook_event_name")
+    if hook_event == "Notification":
+        return _notification_state(event.get("notification_type"))
     target = resolve_state(event=hook_event, state=None)
     if target is RELEASE:
         return "release"
@@ -223,10 +248,16 @@ def build_line(event: dict, *, target: str = "Ghostty", resolve=True) -> str | N
             f"-> uuid={uuid!r} branch={branch!r}"
         )
 
+    state = _state_value(event)
+    # For a Notification we don't want the daemon's event->ATTENTION fallback to
+    # kick in when we deliberately chose "no change" (a transient notification):
+    # drop the event so only the (absent) state speaks.
+    send_event = None if (hook_event == "Notification" and state is None) else hook_event
+
     payload = {
         "session_id": session_id,
-        "event": hook_event,
-        "state": _state_value(hook_event),
+        "event": send_event,
+        "state": state,
         "label": label,
         "branch": branch,
         "tty": _current_tty(),

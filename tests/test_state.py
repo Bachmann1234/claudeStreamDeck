@@ -251,6 +251,16 @@ def test_key_count_must_be_positive():
         SessionModel(key_count=0)
 
 
+def test_force_state_changes_and_reports():
+    m = SessionModel()
+    m.apply(_msg("a", "UserPromptSubmit"))
+    assert m.get("a").state is KeyState.WORKING
+    assert m.force_state("a", KeyState.DONE) is True
+    assert m.get("a").state is KeyState.DONE
+    assert m.force_state("a", KeyState.DONE) is False   # already there
+    assert m.force_state("nope", KeyState.DONE) is False  # unknown session
+
+
 def test_reserved_key_is_never_allocated():
     m = SessionModel(key_count=3, reserved={2})
     m.apply(_msg("a", "SessionStart"))

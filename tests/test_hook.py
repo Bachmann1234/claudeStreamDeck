@@ -125,6 +125,40 @@ def test_build_line_no_session_id_returns_none():
     assert hook.build_line({"hook_event_name": "Stop"}, resolve=False) is None
 
 
+# -- Notification: distinguish a real prompt from an idle one --------------
+
+
+def _notif(ntype=None):
+    e = {"session_id": "abc", "hook_event_name": "Notification"}
+    if ntype is not None:
+        e["notification_type"] = ntype
+    return parse_message(hook.build_line(e, resolve=False))
+
+
+def test_notification_permission_is_attention():
+    assert _notif("permission_prompt").state == "attention"
+
+
+def test_notification_agent_needs_input_is_attention():
+    assert _notif("agent_needs_input").state == "attention"
+
+
+def test_notification_idle_prompt_is_done_not_attention():
+    # The bug: an idle "waiting for your prompt" notification was flashing "?".
+    assert _notif("idle_prompt").state == "done"
+
+
+def test_notification_missing_type_defaults_to_attention():
+    assert _notif(None).state == "attention"  # unknown/old CC -> stay conservative
+
+
+def test_notification_transient_type_leaves_state_unchanged():
+    # auth_success etc.: no state, and the event is dropped so the daemon's
+    # event->ATTENTION fallback can't kick in.
+    msg = _notif("auth_success")
+    assert msg.state is None and msg.event is None
+
+
 # -- branch resolution -----------------------------------------------------
 
 

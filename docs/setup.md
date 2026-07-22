@@ -183,6 +183,17 @@ focused. Two things to know:
   on an abrupt close that fires no `SessionEnd`. `--no-reap` disables it. And if
   a session couldn't be correlated at `SessionStart` (ambiguous focus), the hook
   **re-resolves its UUID on your next prompt** and the daemon fills it in.
+- **Interrupts.** A user interrupt (Esc) fires *no* Claude Code hook — nothing
+  tells the deck the turn ended — so a `working` key would spin forever. A
+  **watchdog** drops any `working` key with no activity for `--working-timeout`
+  seconds (default 60) to `done`. A long single tool call with no intermediate
+  events may hit this early and flip back on the next event; raise the timeout
+  or set `0` to disable.
+- **`Notification` types.** Claude Code fires `Notification` both for a real
+  prompt *and* when it's just idle-waiting (`notification_type: idle_prompt`).
+  The hook maps only `permission_prompt` / `agent_needs_input` /
+  `elicitation_dialog` to the blinking `?`; `idle_prompt` / `agent_completed`
+  show `done`, so an idle session doesn't falsely ask for you.
 
 ## 7. Environment variables
 

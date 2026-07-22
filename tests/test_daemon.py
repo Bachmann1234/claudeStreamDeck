@@ -405,3 +405,44 @@ def test_reaper_skips_when_ghostty_not_running(tmp_path):
     ghostty.running = False
     assert d._reap_dead_surfaces() == 0
     assert d.model.get("a") is not None
+
+
+# -- watchdog: clear a spinner stuck by an interrupt -----------------------
+
+
+def _watchdog_daemon(tmp_path, *, working_timeout=30.0):
+    manager = Manager(ghostty=FakeGhostty(), registry=Registry(path=tmp_path / "r.json"))
+    d = Daemon(manager=manager, renderer=RecordingRenderer(), socket_path=tmp_path / "d.sock",
+               launcher_key=None, working_timeout=working_timeout)
+    return d
+
+
+def test_watchdog_downgrades_stale_working(tmp_path):
+    from streamdeckd.state import KeyState
+
+    d = _watchdog_daemon(tmp_path)
+    d.handle_line(_line(session_id="a", event="UserPromptSubmit", cwd="/w"))  # WORKING
+    key = d.model.get("a").key_index
+    d._activity["a"] -= 40  # pretend the last activity was 40s ago (> 30s timeout)
+    assert d._downgrade_stale_working() == 1
+    assert d.model.get("a").state is KeyState.DONE
+    assert d.renderer.last[key].state is KeyState.DONE
+
+
+def test_watchdog_leaves_fresh_working_alone(tmp_path):
+    from streamdeckd.state import KeyState
+
+    d = _watchdog_daemon(tmp_path)
+    d.handle_line(_line(session_id="a", event="UserPromptSubmit", cwd="/w"))
+    assert d._downgrade_stale_working() == 0  # just active
+    assert d.model.get("a").state is KeyState.WORKING
+
+
+def test_watchdog_disabled_with_zero_timeout(tmp_path):
+    from streamdeckd.state import KeyState
+
+    d = _watchdog_daemon(tmp_path, working_timeout=0)
+    d.handle_line(_line(session_id="a", event="UserPromptSubmit", cwd="/w"))
+    d._activity["a"] -= 9999
+    assert d._downgrade_stale_working() == 0
+    assert d.model.get("a").state is KeyState.WORKING
