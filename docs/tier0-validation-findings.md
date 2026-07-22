@@ -95,7 +95,25 @@ Each case: manipulate a spawned test window into the target state, run
 | Target window **minimized**                  | ✅ PASS | `focus` **deminiaturized** it — contradicts plan's B1 hypothesis; B1 not needed on 1.3.1 |
 | Focus **away** from a native-fullscreen window | ✅ PASS | Switching to a normal-Space terminal works even with a fullscreen window present |
 | Focus **into** a native-fullscreen window (own Space) | 🔴 **FAIL** | Space did **not** switch; the fullscreen target never came to front (front stayed on the other-Space window). Same measurement method as the PASS row above, so the asymmetry is real. |
-| Target on **another user-created Space** (non-fullscreen) | ⚠️ UNTESTED | Not scriptable (Spaces assignment has no public API). Given the fullscreen-Space failure, expect the same dependency on System Settings → Desktop & Dock → *"When switching to an application, switch to a Space with open windows."* Needs a manual visual check. |
+| Target on **another user-created Space** (non-fullscreen) | ✅ PASS *(setting-dependent)* | **Verified manually 2026-07-21.** With `com.apple.dock workspaces-auto-swoosh` **ON** (the macOS default), `focus terminal id` **switched to the other Space and raised the window**. With it **OFF**, focus stayed put — no Space switch. See the dedicated note below. |
+
+### Cross-Space focus depends on one Dock setting (manual test, 2026-07-21)
+
+Put a Ghostty window on a second **non-fullscreen** Space, switched away, then
+ran the exact `focus terminal id "<uuid>"` a keypress uses:
+
+| `com.apple.dock workspaces-auto-swoosh` | Result |
+|:----------------------------------------|:-------|
+| **ON** (unset default) | ✅ macOS switched to the target's Space and raised the window |
+| **OFF** (`-bool false`, `killall Dock`) | ❌ stayed on the current Space; window not brought across |
+
+This is the System Settings toggle **Desktop & Dock → "When switching to an
+application, switch to a Space with open windows."** It is **ON by default**, so
+**cross-Space focus works out of the box** for regular Spaces — no fork, no
+Space-handling code needed. The daemon should simply document this setting as a
+prerequisite (like the Automation/TCC grant). Only **native-fullscreen** targets
+(row above) remain a hard failure; that is the sole case the deferred Space fork
+would address, and it's niche enough to stay deferred.
 
 ### Dead-surface error signatures (for the prune path)
 
@@ -157,10 +175,12 @@ nothing rather than to a live object with a nil weak `surfaceView`.)
    failure. Verify the non-fullscreen cross-Space case manually before scoping
    any patch.
 
-## Suggested manual check (the one thing not scriptable)
+## Manual check — DONE 2026-07-21 ✅
 
-Put a Ghostty window on a second (non-fullscreen) Space, switch to another
-Space, then `focus terminal id "<uuid>"` of a surface in that window. Confirm
-whether macOS switches Spaces. Toggle System Settings → Desktop & Dock →
-*"When switching to an application, switch to a Space with open windows"* and
-retest — that setting is the likely lever.
+Ran exactly as scoped: a Ghostty window on a second (non-fullscreen) Space,
+switched away, then `focus terminal id "<uuid>"`. **Result: cross-Space focus
+works when `com.apple.dock workspaces-auto-swoosh` (System Settings → Desktop &
+Dock → "When switching to an application, switch to a Space with open windows")
+is ON — the macOS default — and fails when it's OFF.** That setting is the lever;
+it's on by default, so no fork is needed for regular Spaces. Full table in *Step
+1c* above.

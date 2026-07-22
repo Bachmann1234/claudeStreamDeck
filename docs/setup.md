@@ -163,6 +163,13 @@ focused. Two things to know:
   trigger). Approve both. Until approved, the deck still lights up correctly;
   only focus is unavailable.
 - **`macos-applescript` must stay enabled** in Ghostty (it is by default).
+- **Cross-Space focus needs one Dock setting.** To make a key press pull you to a
+  session that's on **another Space**, leave **System Settings → Desktop & Dock →
+  "When switching to an application, switch to a Space with open windows"** ON
+  (the macOS default). With it off, focus won't switch Spaces — it silently stays
+  put. Verified 2026-07-21; details in `docs/tier0-validation-findings.md`.
+  (Native-**fullscreen** windows on their own Space are the one case that still
+  won't switch regardless — a deferred, niche limitation.)
 
 ## 7. Environment variables
 

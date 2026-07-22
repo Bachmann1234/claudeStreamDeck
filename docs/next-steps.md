@@ -68,16 +68,19 @@ With a resolved uuid from #2:
 - [ ] Edge cases from `docs/tier0-validation-findings.md`: background window ✅,
       minimized ✅ (both already validated) — just confirm they still hold.
 
-## 4. The one un-scriptable check from the findings doc ⏱️ ~5 min
+## 4. The one un-scriptable check from the findings doc — ✅ DONE 2026-07-21
 
-`docs/tier0-validation-findings.md` flagged this as needing a human:
-
-- [ ] Put a Ghostty window on a **second (non-fullscreen) Space**, switch away,
-      then `{"press":N}` that session. Does macOS switch Spaces to it?
-- [ ] Toggle **System Settings → Desktop & Dock → "When switching to an
-      application, switch to a Space with open windows"** and retest.
-- [ ] Report which setting makes cross-Space focus work — determines whether the
-      deferred fullscreen/Space fork patch is ever worth it.
+- [x] Put a Ghostty window on a **second (non-fullscreen) Space**, switched away,
+      ran the keypress focus command. **macOS switched to that Space and raised
+      the window** — cross-Space focus works.
+- [x] Toggled **Desktop & Dock → "When switching to an application, switch to a
+      Space with open windows"** (`com.apple.dock workspaces-auto-swoosh`) and
+      retested: **ON (default) → works; OFF → focus does not cross Spaces.**
+- [x] **Verdict:** that setting is the lever, and it's **ON by default**, so
+      cross-Space focus works out of the box for regular Spaces — **no fork
+      needed**. Only native-**fullscreen** targets remain a hard failure (their
+      own Space doesn't switch); that niche stays deferred. Recorded in
+      `docs/tier0-validation-findings.md` (Step 1c + dedicated note).
 
 ## 5. Install as a login service (optional) ⏱️ ~5 min
 
