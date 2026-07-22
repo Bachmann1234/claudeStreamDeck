@@ -114,18 +114,21 @@ Everything above uses the VirtualDeck; this lit up the real board.
       sends a `branch` field; the model prefers it over the repo basename. Size
       calibrated on the physical deck (`draw_label` auto-fits one line). Falls
       back to the repo basename (same clip) outside a repo / on detached HEAD.
-- [ ] **Animation:** ATTENTION renders as a *static* white ring (no tick loop).
-      If you want it to actually pulse, see the animation decision below.
-- [ ] **Auto-detect at startup:** `cli.py` uses `--deck` opt-in. Could instead
-      try `StreamDeckRenderer.open_first()` and fall back to VirtualDeck.
+- [x] **Animation — DONE 2026-07-21.** ATTENTION keys pulse on the physical
+      deck: a background ticker (`streamdeckd/animation.py`, ~12 fps) breathes
+      the fill ~1.3 s/cycle down to 25 % brightness. Depth tuned live. The
+      virtual deck stays static (files can't breathe). `--no-animate` disables.
+- [x] **Auto-detect at startup — DONE 2026-07-21.** `streamdeckd` (no flag)
+      tries `StreamDeckRenderer.open_first()` and falls back to VirtualDeck.
+      `--deck` forces hardware (errors if absent); `--virtual` forces the file
+      deck.
 
 ---
 
 ## Decisions I need from you (not blocking, but shape what I build next)
 
-- [ ] **Animation (M5):** want pulsing "needs you" / spinner "working" keys? That
-      means giving the daemon a background render-tick loop (a thread that
-      repaints animated keys a few times a second). Yes / no?
+- [x] ~~**Animation (M5):**~~ **Done** — pulsing "needs you" keys, via a daemon
+      render-tick thread. (A "working" spinner is still possible later if wanted.)
 - [ ] **tmux for session survival:** UUIDs die when Ghostty restarts. Accept that
       (keys just re-resolve on the next session), or run sessions under tmux so
       they survive? (README open question.)

@@ -30,10 +30,12 @@ Useful flags:
 | Flag              | Default                                   | Purpose                                  |
 |-------------------|-------------------------------------------|------------------------------------------|
 | `--socket PATH`   | `~/.claudeStreamDeck/streamdeckd.sock`    | where hooks connect                      |
-| `--deck`          | off                                       | drive a **real Stream Deck** over USB (see §2a) |
-| `--brightness N`  | `60`                                      | physical deck brightness % (`--deck` only) |
+| `--deck`          | auto                                      | **require** a physical deck; error if absent (see §2a) |
+| `--virtual`       | auto                                      | **force** the virtual deck even if a deck is attached |
+| `--brightness N`  | `60`                                      | physical deck brightness %               |
+| `--no-animate`    | off                                       | disable the pulsing "needs you" animation |
 | `--out-dir DIR`   | `~/.claudeStreamDeck/virtualdeck`         | where the virtual deck is written        |
-| `--keys N`        | `15`                                      | key count (the 20GAA9902 is a 3×5 = 15)  |
+| `--keys N`        | `15`                                      | virtual-deck key count (hardware reports its own) |
 | `--no-png`        | off                                       | write only `snapshot.json`, skip PNGs    |
 | `--target NAME`   | `Ghostty`                                 | Ghostty app name/path for focus          |
 | `-v`              | off                                       | debug logging                            |
@@ -41,10 +43,13 @@ Useful flags:
 The daemon refuses to start if another instance is already listening on the
 socket, and cleans up a stale socket file left by a crash.
 
-## 2a. Drive a real Stream Deck (`--deck`)
+## 2a. Drive a real Stream Deck (auto-detected)
 
-The default is the virtual deck; `--deck` paints the physical board instead.
-The daemon logic is identical — only the `Renderer` swaps.
+By default `streamdeckd` **auto-detects**: if a Stream Deck is attached it drives
+the physical board, otherwise it falls back to the virtual (file-backed) deck.
+`--deck` forces hardware (erroring if none is found); `--virtual` forces the
+file deck even when hardware is present. The daemon logic is identical either
+way — only the `Renderer` swaps.
 
 ```bash
 # 1. Quit the Elgato Stream Deck app first — it holds the USB device
@@ -53,11 +58,14 @@ The daemon logic is identical — only the `Renderer` swaps.
 brew install hidapi
 pip install streamdeck            # into the project venv
 
-streamdeckd --deck -v             # opens the attached deck, paints keys,
-                                  # forwards physical presses to focus
+streamdeckd -v                    # auto-detects; opens the deck if present,
+                                  # paints keys, forwards presses to focus
 ```
 
-- `--keys` is ignored under `--deck` (the count comes from the device).
+- On the physical deck, `ATTENTION` ("needs you") keys **pulse** — the fill
+  breathes ~1.3 s/cycle down to a quarter brightness. `--no-animate` turns it
+  off. The virtual deck stays static (a still PNG can't breathe; the white ring
+  already reads as attention).
 - A **physical key press** takes the exact same path as `{"press": N}` on the
   socket: it focuses that session's Ghostty surface (needs a resolved UUID —
   see §6). No extra wiring.
@@ -65,8 +73,8 @@ streamdeckd --deck -v             # opens the attached deck, paints keys,
   **72×72 JPEG, flipped both axes** — handled automatically by the library's
   `PILHelper`, so nothing downstream hard-codes the size. Presses did **not**
   require an Input-Monitoring grant on the test machine.
-- If it prints `could not open Stream Deck: no Stream Deck found`, the Elgato
-  app is probably still running, or the deck is unplugged.
+- If `--deck` prints `could not open Stream Deck`, the Elgato app is probably
+  still running, or the deck is unplugged.
 
 ## 3. Watch the virtual deck
 

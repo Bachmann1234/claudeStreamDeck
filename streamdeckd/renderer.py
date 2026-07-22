@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from .state import KeyAppearance, KeyState, appearance_for
+from .state import APPEARANCE, KeyAppearance, KeyState, appearance_for
 
 try:  # Pillow is a hard dep for PNG output but we degrade cleanly without it.
     from PIL import Image, ImageDraw, ImageFont
@@ -48,6 +48,12 @@ class VirtualDeck:
     composite ``deck.png`` of the whole board per render — so a human (or a
     test) can eyeball exactly what a physical deck would show.
     """
+
+    # The daemon skips the animation ticker for the virtual deck: a still PNG
+    # can't convey a breath anyway, and re-emitting 15 PNGs + a composite many
+    # times a second would thrash the disk. The static ring already reads as
+    # "attention". Only the hardware renderer opts into animation.
+    animated = False
 
     def __init__(
         self,
@@ -153,7 +159,7 @@ class VirtualDeck:
                 width=3,
             )
         if appearance.label:
-            draw_label(draw, size, appearance.label, _readable_text_color(appearance.color))
+            draw_label(draw, size, appearance.label, label_color_for(appearance))
         return img
 
 
@@ -165,6 +171,15 @@ def _readable_text_color(bg: tuple[int, int, int]) -> tuple[int, int, int]:
     r, g, b = bg
     luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
     return (0, 0, 0) if luminance > 140 else (255, 255, 255)
+
+
+def label_color_for(appearance: KeyAppearance) -> tuple[int, int, int]:
+    """Contrast colour for a key's label, chosen from the *base* state colour —
+    not the instantaneous ``appearance.color``, which an animation may have
+    dimmed. Fixing it to the base keeps the text from flickering black↔white as
+    a pulsing key breathes."""
+    base = APPEARANCE.get(appearance.state)
+    return _readable_text_color(base.color if base else appearance.color)
 
 
 # TrueType faces to try, best first; falls back to Pillow's bitmap font if none

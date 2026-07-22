@@ -234,3 +234,55 @@ def test_model_renderer_key_mismatch_rejected(tmp_path):
             model=SessionModel(key_count=6),
             socket_path=tmp_path / "x.sock",
         )
+
+
+# -- animation ticker ------------------------------------------------------
+
+
+def _animated_daemon(tmp_path, *, animate=True):
+    manager = Manager(ghostty=FakeGhostty(), registry=Registry(path=tmp_path / "r.json"))
+    renderer = RecordingRenderer(animated=True)
+    d = Daemon(
+        manager=manager,
+        renderer=renderer,
+        socket_path=tmp_path / "d.sock",
+        animate=animate,
+    )
+    return d, renderer
+
+
+def test_tick_animation_noop_without_pulsing_key(tmp_path):
+    d, renderer = _animated_daemon(tmp_path)
+    d.handle_line(_line(session_id="a", event="UserPromptSubmit", cwd="/w/r"))
+    before = len(renderer.frames)
+    assert d._tick_animation(phase=0.0) is False
+    assert len(renderer.frames) == before  # nothing rendered
+
+
+def test_tick_animation_dims_attention_key(tmp_path):
+    from streamdeckd.state import KeyState, appearance_for
+
+    d, renderer = _animated_daemon(tmp_path)
+    d.handle_line(_line(session_id="a", event="Notification", cwd="/w/r"))  # ATTENTION
+    base = appearance_for(KeyState.ATTENTION).color
+    assert d._tick_animation(phase=0.0) is True  # dimmest breath
+    dimmed = renderer.last[0].color
+    assert dimmed != base and all(c <= b for c, b in zip(dimmed, base))
+    assert renderer.last[0].pulse is True  # still flagged (ring stays)
+
+
+def test_animate_flag_off_disables_ticker(tmp_path):
+    d, _ = _animated_daemon(tmp_path, animate=False)
+    assert d._animate is False
+
+
+def test_virtual_renderer_never_animates(tmp_path):
+    # A renderer that doesn't opt in (animated=False) is never ticked.
+    manager = Manager(ghostty=FakeGhostty(), registry=Registry(path=tmp_path / "r.json"))
+    d = Daemon(
+        manager=manager,
+        renderer=RecordingRenderer(animated=False),
+        socket_path=tmp_path / "d.sock",
+        animate=True,
+    )
+    assert d._animate is False

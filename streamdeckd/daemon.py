@@ -22,12 +22,14 @@ import signal
 import socket
 import socketserver
 import threading
+import time
 from pathlib import Path
 
 from gsm.applescript import DeadSurface, Ghostty
 from gsm.manager import Manager, UnknownTag
 from gsm.registry import default_home
 
+from .animation import animate_frame, has_animation, phase_at
 from .protocol import ProtocolError, parse_message
 from .renderer import Renderer, VirtualDeck
 from .state import ApplyResult, SessionModel, Slot
@@ -56,6 +58,7 @@ class Daemon:
         renderer: Renderer | None = None,
         model: SessionModel | None = None,
         socket_path: Path | str | None = None,
+        animate: bool = True,
     ):
         self.manager = manager or Manager()
         self.renderer = renderer or VirtualDeck()
@@ -68,6 +71,12 @@ class Daemon:
         self.socket_path = Path(socket_path) if socket_path else default_socket_path()
         self._lock = threading.RLock()
         self._server: socketserver.BaseServer | None = None
+        # Animation: only meaningful for a renderer that opts in (the hardware
+        # deck; the VirtualDeck's frames are files, so it stays static).
+        self._animate = animate and getattr(self.renderer, "animated", False)
+        self._anim_stop = threading.Event()
+        self._anim_thread: threading.Thread | None = None
+        self._started_at = time.monotonic()
 
     # -- message handling --------------------------------------------------
 
@@ -141,6 +150,50 @@ class Daemon:
     def _repaint(self) -> None:
         self.renderer.render(self.model.snapshot_keys())
 
+    # -- animation ---------------------------------------------------------
+
+    def _tick_animation(self, phase: float | None = None) -> bool:
+        """Render one animated frame if any key is pulsing. Returns whether it
+        did (so the loop can idle when nothing needs motion). ``phase`` is
+        injectable for tests; otherwise derived from the monotonic clock."""
+        with self._lock:
+            keys = self.model.snapshot_keys()
+            if not has_animation(keys):
+                return False
+            if phase is None:
+                phase = phase_at(time.monotonic() - self._started_at)
+            self.renderer.render(animate_frame(keys, phase))
+            return True
+
+    def _animation_loop(self) -> None:
+        """Background ticker: ~12 fps while a key breathes, a lazy poll otherwise
+        so a newly-ATTENTION key starts pulsing within a fraction of a second."""
+        active_dt, idle_dt = 1 / 12, 0.2
+        while not self._anim_stop.is_set():
+            try:
+                animating = self._tick_animation()
+            except Exception:  # pragma: no cover - a paint hiccup must not kill the loop
+                log.exception("animation tick failed")
+                animating = False
+            if self._anim_stop.wait(active_dt if animating else idle_dt):
+                return
+
+    def _start_animation(self) -> None:
+        if not self._animate or self._anim_thread is not None:
+            return
+        self._anim_stop.clear()
+        self._anim_thread = threading.Thread(
+            target=self._animation_loop, name="streamdeckd-animator", daemon=True
+        )
+        self._anim_thread.start()
+        log.info("animation ticker started (pulsing 'needs you' keys)")
+
+    def _stop_animation(self) -> None:
+        self._anim_stop.set()
+        thread, self._anim_thread = self._anim_thread, None
+        if thread is not None:
+            thread.join(timeout=1.0)
+
     # -- keypress -> focus -------------------------------------------------
 
     def press(self, key_index: int) -> Slot | None:
@@ -201,6 +254,7 @@ class Daemon:
 
         with self._lock:
             self._repaint()  # blank frame so a reader sees a coherent deck
+        self._start_animation()
         log.info("streamdeckd listening on %s (%d keys)",
                  self.socket_path, self.model.key_count)
         try:
@@ -244,6 +298,7 @@ class Daemon:
             s.close()
 
     def _teardown_socket(self) -> None:
+        self._stop_animation()
         try:
             if self._server is not None:
                 self._server.server_close()

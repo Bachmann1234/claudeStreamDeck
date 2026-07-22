@@ -24,7 +24,7 @@ from typing import Callable
 
 from PIL import ImageDraw
 
-from .renderer import _readable_text_color, draw_label
+from .renderer import draw_label, label_color_for
 from .state import KeyAppearance, KeyState, appearance_for
 
 log = logging.getLogger("streamdeckd.hw")
@@ -38,6 +38,16 @@ class StreamDeckRenderer:
     Only keys whose appearance actually changed are re-pushed each frame, since
     a USB image write is far costlier than the dict comparison that gates it.
     """
+
+    # The daemon may run its animation ticker against this renderer (unlike the
+    # VirtualDeck, whose frames are files). USB image writes are cheap enough to
+    # push a pulsing key a dozen times a second.
+    animated = True
+
+    # Bound the native-bytes cache: animation produces many dim variants of the
+    # same key, so evict wholesale past this many distinct appearances rather
+    # than grow without limit across a long-lived daemon.
+    _CACHE_CAP = 512
 
     def __init__(
         self,
@@ -117,6 +127,8 @@ class StreamDeckRenderer:
     def _native_for(self, appearance: KeyAppearance) -> bytes:
         cached = self._native_cache.get(appearance)
         if cached is None:
+            if len(self._native_cache) >= self._CACHE_CAP:
+                self._native_cache.clear()  # animation churns variants; reset wholesale
             cached = self._render_native(appearance)
             self._native_cache[appearance] = cached
         return cached
@@ -134,7 +146,7 @@ class StreamDeckRenderer:
                 [2, 2, size - 3, size - 3], outline=(255, 255, 255), width=3
             )
         if appearance.label:
-            draw_label(draw, size, appearance.label, _readable_text_color(appearance.color))
+            draw_label(draw, size, appearance.label, label_color_for(appearance))
         return PILHelper.to_native_format(self.deck, img)
 
 

@@ -84,10 +84,15 @@ class FakeDeck:
 
 
 class RecordingRenderer:
-    """Renderer that keeps every frame it was asked to paint."""
+    """Renderer that keeps every frame it was asked to paint.
 
-    def __init__(self, key_count: int = 15):
+    ``animated`` mirrors the real renderers' opt-in flag so the daemon's
+    animation ticker can be exercised against it.
+    """
+
+    def __init__(self, key_count: int = 15, *, animated: bool = False):
         self.key_count = key_count
+        self.animated = animated
         self.frames: list[list] = []
         self.closed = False
 

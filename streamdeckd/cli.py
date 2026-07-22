@@ -24,25 +24,38 @@ from .renderer import VirtualDeck
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="streamdeckd",
-        description="Headless Claude Code Stream Deck daemon (virtual deck).",
+        description="Headless Claude Code Stream Deck daemon. Auto-detects a "
+        "physical Stream Deck and falls back to a virtual (file-backed) deck.",
     )
     p.add_argument(
         "--socket",
         default=None,
         help=f"unix socket path (default: {default_socket_path()})",
     )
-    p.add_argument("--keys", type=int, default=15, help="number of keys (default 15)")
-    p.add_argument(
+    p.add_argument("--keys", type=int, default=15, help="virtual-deck key count (default 15)")
+    # Deck selection: default auto-detects; these two force a choice.
+    deck = p.add_mutually_exclusive_group()
+    deck.add_argument(
         "--deck",
         action="store_true",
-        help="drive a real Stream Deck over USB HID instead of the virtual deck "
-        "(quit the Elgato app first; --keys is ignored, taken from the device)",
+        help="require a physical Stream Deck: error out if none is found "
+        "(quit the Elgato app first). Default is to auto-detect and fall back.",
+    )
+    deck.add_argument(
+        "--virtual",
+        action="store_true",
+        help="force the virtual (file-backed) deck even if hardware is present",
     )
     p.add_argument(
         "--brightness",
         type=int,
         default=60,
-        help="physical deck brightness percent (--deck only, default 60)",
+        help="physical deck brightness percent (default 60)",
+    )
+    p.add_argument(
+        "--no-animate",
+        action="store_true",
+        help="disable the pulsing 'needs you' animation on the physical deck",
     )
     p.add_argument(
         "--out-dir",
@@ -63,6 +76,31 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _make_renderer(args, log):
+    """Pick a renderer: auto-detect hardware unless forced.
+
+    ``--virtual`` forces the file-backed deck; ``--deck`` requires hardware
+    (raises if absent); the default tries the deck and falls back to virtual.
+    Returns the renderer, or raises on ``--deck`` with no device attached.
+    """
+    if not args.virtual:
+        from .streamdeck_renderer import StreamDeckRenderer
+
+        try:
+            renderer = StreamDeckRenderer.open_first(brightness=args.brightness)
+            log.info("using the physical Stream Deck")
+            return renderer
+        except Exception as e:
+            if args.deck:
+                raise  # explicit --deck: surface the error, don't fall back
+            log.info("no physical Stream Deck (%s); using the virtual deck", e)
+
+    out_dir = args.out_dir if args.out_dir is not None else default_virtualdeck_dir()
+    return VirtualDeck(
+        key_count=args.keys, out_dir=out_dir, write_png=not args.no_png
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     logging.basicConfig(
@@ -71,30 +109,19 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     log = logging.getLogger("streamdeckd")
-    if args.deck:
-        from .streamdeck_renderer import StreamDeckRenderer
-
-        try:
-            renderer = StreamDeckRenderer.open_first(brightness=args.brightness)
-        except Exception as e:
-            log.error("could not open Stream Deck: %s", e)
-            return 1
-    else:
-        out_dir = (
-            args.out_dir if args.out_dir is not None else default_virtualdeck_dir()
-        )
-        renderer = VirtualDeck(
-            key_count=args.keys,
-            out_dir=out_dir,
-            write_png=not args.no_png,
-        )
+    try:
+        renderer = _make_renderer(args, log)
+    except Exception as e:
+        log.error("could not open Stream Deck: %s", e)
+        return 1
     daemon = Daemon(
         manager=Manager(ghostty=Ghostty(args.target)),
         renderer=renderer,
         socket_path=args.socket,
+        animate=not args.no_animate,
     )
     # A physical press must reach the same focus path as {"press": N}.
-    if args.deck:
+    if hasattr(renderer, "on_press"):
         renderer.on_press = daemon.press
     try:
         daemon.serve_forever()
