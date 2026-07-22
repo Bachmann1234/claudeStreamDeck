@@ -133,9 +133,14 @@ Everything above uses the VirtualDeck; this lit up the real board.
 
 - [x] ~~**Animation (M5):**~~ **Done** — spinner on WORKING keys + a blinking
       white `?` on ATTENTION keys, via a daemon render-tick thread.
-- [ ] **tmux for session survival:** UUIDs die when Ghostty restarts. Accept that
-      (keys just re-resolve on the next session), or run sessions under tmux so
-      they survive? (README open question.)
+- [x] ~~**tmux for session survival:**~~ **Decided: no tmux** (2026-07-21). It
+      doesn't preserve the surface UUID (that's Ghostty's, dies with the surface)
+      and `tmux attach` fires no `SessionStart`, so it would leave bindings stale
+      silently. Without it the system self-heals: a restart ends the session, the
+      next `claude` re-registers, and the daemon prunes dead bindings on the
+      first failed focus. If survival ever matters, add **re-resolution on
+      activity** (re-send UUID on `UserPromptSubmit` / a periodic reconciler when
+      the binding is dead) rather than a tmux dependency. See README open Qs.
 - [x] ~~**Build the `StreamDeckRenderer` now**~~ **Done** — built and validated
       live against the real board (2026-07-21).
 - [ ] **Config file (M5 backlog):** move colors / Ghostty app name / socket path /

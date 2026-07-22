@@ -108,7 +108,14 @@ step toward the next.
   (ATTENTION > WORKING > STARTING > DONE) and parks it; a freed key promotes the
   best-ranked parked session back. Paging remains a possible future addition for
   very high counts.
-- Whether to depend on tmux for session survival across Ghostty restarts, or
-  accept that a UUID (and its key) dies with the surface. **Still open** — today
-  the daemon prunes a dead mapping on the first failed focus and re-resolves on
-  the session's next `SessionStart`.
+- ~~Whether to depend on tmux for session survival across Ghostty restarts~~
+  **Decided: no tmux.** A surface UUID is Ghostty's and dies with the surface —
+  tmux doesn't preserve it (a reattached session lands in a *new* surface with a
+  *new* UUID). Worse, `tmux attach` fires no `SessionStart`, and re-resolution
+  only happens there, so tmux would leave a binding stale *silently*. Without it,
+  a restart cleanly ends the session; the next `claude` re-registers on
+  `SessionStart`, and the daemon prunes a dead binding on the first failed focus
+  — it self-heals. If survival-across-restart ever matters, the right fix is
+  **re-resolution on activity** (re-send the UUID on `UserPromptSubmit`, or a
+  periodic daemon reconciler, when the current binding is dead) — a small change
+  to the correlation layer, not a per-session workflow dependency.
