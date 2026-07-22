@@ -24,7 +24,7 @@ from typing import Callable
 
 from PIL import ImageDraw
 
-from .renderer import draw_label, label_color_for
+from .renderer import _paint_key_face
 from .state import KeyAppearance, KeyState, appearance_for
 
 log = logging.getLogger("streamdeckd.hw")
@@ -138,15 +138,7 @@ class StreamDeckRenderer:
 
         img = PILHelper.create_image(self.deck, background=appearance.color)
         draw = ImageDraw.Draw(img)
-        size = img.width  # square key
-        if appearance.pulse:
-            # Static bright ring so an attention key reads as "look at me" even
-            # without an animation tick (mirrors the VirtualDeck PNG).
-            draw.rectangle(
-                [2, 2, size - 3, size - 3], outline=(255, 255, 255), width=3
-            )
-        if appearance.label:
-            draw_label(draw, size, appearance.label, label_color_for(appearance))
+        _paint_key_face(draw, img.width, appearance)
         return PILHelper.to_native_format(self.deck, img)
 
 

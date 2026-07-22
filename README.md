@@ -55,7 +55,7 @@ surface.
 |-----------------------------|--------------------------------|--------------------|
 | `SessionStart`              | claim a free key               | dim / labeled      |
 | `UserPromptSubmit`, `PreToolUse` | working                   | blue (or animated) |
-| `Notification`              | needs you (question/permission)| pulsing yellow     |
+| `Notification`              | needs you (question/permission)| yellow, blinking `?` |
 | `Stop`                      | response finished / done       | green              |
 | `SessionEnd`                | release the key                | blank              |
 

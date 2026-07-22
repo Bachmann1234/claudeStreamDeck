@@ -251,24 +251,31 @@ def _animated_daemon(tmp_path, *, animate=True):
     return d, renderer
 
 
-def test_tick_animation_noop_without_pulsing_key(tmp_path):
+def test_tick_animation_noop_when_all_keys_calm(tmp_path):
     d, renderer = _animated_daemon(tmp_path)
-    d.handle_line(_line(session_id="a", event="UserPromptSubmit", cwd="/w/r"))
+    d.handle_line(_line(session_id="a", event="Stop", cwd="/w/r"))  # DONE: no motion
     before = len(renderer.frames)
-    assert d._tick_animation(phase=0.0) is False
+    assert d._tick_animation(elapsed=0.0) is False
     assert len(renderer.frames) == before  # nothing rendered
 
 
-def test_tick_animation_dims_attention_key(tmp_path):
-    from streamdeckd.state import KeyState, appearance_for
+def test_tick_animation_blinks_attention_key(tmp_path):
+    from streamdeckd.animation import BLINK_PERIOD_S
 
     d, renderer = _animated_daemon(tmp_path)
     d.handle_line(_line(session_id="a", event="Notification", cwd="/w/r"))  # ATTENTION
-    base = appearance_for(KeyState.ATTENTION).color
-    assert d._tick_animation(phase=0.0) is True  # dimmest breath
-    dimmed = renderer.last[0].color
-    assert dimmed != base and all(c <= b for c, b in zip(dimmed, base))
-    assert renderer.last[0].pulse is True  # still flagged (ring stays)
+    assert d._tick_animation(elapsed=BLINK_PERIOD_S * 0.75) is True  # off half
+    assert renderer.last[0].pulse is True
+    assert renderer.last[0].blink_on is False  # the "?" is hidden this frame
+
+
+def test_tick_animation_spins_working_key(tmp_path):
+    from streamdeckd.animation import SPIN_PERIOD_S
+
+    d, renderer = _animated_daemon(tmp_path)
+    d.handle_line(_line(session_id="a", event="UserPromptSubmit", cwd="/w/r"))  # WORKING
+    assert d._tick_animation(elapsed=SPIN_PERIOD_S / 4) is True
+    assert renderer.last[0].spin is not None  # rotation phase stamped for the renderer
 
 
 def test_animate_flag_off_disables_ticker(tmp_path):

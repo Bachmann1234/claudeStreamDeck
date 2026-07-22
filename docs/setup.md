@@ -33,7 +33,7 @@ Useful flags:
 | `--deck`          | auto                                      | **require** a physical deck; error if absent (see §2a) |
 | `--virtual`       | auto                                      | **force** the virtual deck even if a deck is attached |
 | `--brightness N`  | `60`                                      | physical deck brightness %               |
-| `--no-animate`    | off                                       | disable the pulsing "needs you" animation |
+| `--no-animate`    | off                                       | disable the blinking "?" / spinner animations |
 | `--out-dir DIR`   | `~/.claudeStreamDeck/virtualdeck`         | where the virtual deck is written        |
 | `--keys N`        | `15`                                      | virtual-deck key count (hardware reports its own) |
 | `--no-png`        | off                                       | write only `snapshot.json`, skip PNGs    |
@@ -62,10 +62,11 @@ streamdeckd -v                    # auto-detects; opens the deck if present,
                                   # paints keys, forwards presses to focus
 ```
 
-- On the physical deck, `ATTENTION` ("needs you") keys **pulse** — the fill
-  breathes ~1.3 s/cycle down to a quarter brightness. `--no-animate` turns it
-  off. The virtual deck stays static (a still PNG can't breathe; the white ring
-  already reads as attention).
+- On the physical deck, keys **animate**: an `ATTENTION` ("needs you") key
+  blinks a white **`?`** on yellow (~0.9 s/cycle), and a `WORKING` key shows a
+  spinner arc rotating around its edge (~1.1 s/revolution). `--no-animate` turns
+  both off. The virtual deck stays static (a still PNG can't move) — it shows a
+  steady `?` on attention keys.
 - A **physical key press** takes the exact same path as `{"press": N}` on the
   socket: it focuses that session's Ghostty surface (needs a resolved UUID —
   see §6). No extra wiring.
@@ -107,8 +108,8 @@ tile stamped with its key index (so key `3` maps to `{"press": 3}`).
 }
 ```
 
-State → color: `starting` dim grey · `working` blue · `attention` pulsing
-yellow · `done` green · `empty` black. (See the README table.)
+State → color: `starting` dim grey · `working` blue (spinner) · `attention`
+yellow (blinking `?`) · `done` green · `empty` black. (See the README table.)
 
 ## 4. Drive it by hand (no hooks yet)
 
@@ -118,7 +119,7 @@ The socket speaks newline-delimited JSON. A session's whole life in four lines:
 S=~/.claudeStreamDeck/streamdeckd.sock
 printf '{"session_id":"demo","event":"SessionStart","uuid":"","cwd":"'"$PWD"'"}\n' | nc -U "$S"
 printf '{"session_id":"demo","event":"UserPromptSubmit"}\n' | nc -U "$S"   # -> blue
-printf '{"session_id":"demo","event":"Notification"}\n'    | nc -U "$S"   # -> pulsing yellow
+printf '{"session_id":"demo","event":"Notification"}\n'    | nc -U "$S"   # -> yellow, blinking ?
 printf '{"session_id":"demo","event":"Stop"}\n'            | nc -U "$S"   # -> green
 printf '{"session_id":"demo","event":"SessionEnd"}\n'      | nc -U "$S"   # -> blank
 ```
@@ -145,7 +146,7 @@ The hooks are `async` with a short timeout and swallow every error, so a stopped
 daemon never slows down or breaks Claude.
 
 Now start a Claude Code session in Ghostty and watch `snapshot.json`: a fresh
-session lights a key (dim), it goes blue while working, pulsing yellow when it
+session lights a key (dim), it goes blue while working, yellow with a `?` when it
 needs you, green when done, and blank when you exit.
 
 ## 6. Session ↔ surface correlation & the one-time macOS grant

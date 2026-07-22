@@ -5,10 +5,13 @@
 **Depends on:** M1–M4 (working end-to-end).
 
 ## Tasks
-- [ ] **Visual design** of key states: clear icons + color, readable labels
-      (repo name / short session label). Legible at the deck's small key size.
-- [ ] **Animation** for "working" (spinner/pulse) and "needs you" (attention
-      pulse). Daemon needs a render tick loop for animated keys only.
+- [x] **Visual design** of key states: color per state + a readable label — the
+      **git branch**, single line, 7-char cap, auto-sized (`format_branch_label`
+      + `draw_label`). Calibrated live on the physical deck. *(2026-07-21)*
+- [x] **Animation** — a daemon render-tick thread (`streamdeckd/animation.py`,
+      ~12 fps, animated keys only): **WORKING** shows a rotating **spinner** arc,
+      **ATTENTION** blinks a white **`?`** on yellow. `--no-animate` disables;
+      the virtual deck stays static. Speeds/colours tuned live. *(2026-07-21)*
 - [x] **Overflow handling** for >15 concurrent sessions:
   - [x] Decide: paging (a key toggles page), or LRU-evict finished sessions'
         keys, or reserve key 14 as an "overflow/more" indicator.

@@ -14,7 +14,7 @@ Hook event       Meaning                             Key appearance
 SessionStart     claim a free key                    dim / labeled
 UserPromptSubmit working                             blue
 PreToolUse       working                             blue
-Notification     needs you (question / permission)   pulsing yellow
+Notification     needs you (question / permission)   yellow, blinking "?"
 Stop             response finished / done            green
 SessionEnd       release the key                     blank
 ===============  ==================================  ==================
@@ -82,12 +82,21 @@ def resolve_state(*, event: str | None, state: str | None) -> object | None:
 
 @dataclass(frozen=True)
 class KeyAppearance:
-    """How one key should look. The renderer's sole input per key."""
+    """How one key should look. The renderer's sole input per key.
+
+    ``spin`` is an animation phase (0..1) the ticker stamps on a WORKING key for
+    the renderer to draw a rotating spinner; ``None`` on a still key. ``pulse``
+    marks the "needs you" (ATTENTION) key, which the renderer draws as a big
+    ``?``; ``blink_on`` (toggled by the ticker) is whether that ``?`` is showing
+    this frame — it defaults ``True`` so a still preview shows a steady ``?``.
+    """
 
     state: KeyState
     color: tuple[int, int, int]
     label: str = ""
     pulse: bool = False
+    spin: float | None = None
+    blink_on: bool = True
 
     def to_dict(self) -> dict:
         return {

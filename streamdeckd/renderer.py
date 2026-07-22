@@ -150,16 +150,7 @@ class VirtualDeck:
         size = self.key_size
         img = Image.new("RGB", (size, size), appearance.color)
         draw = ImageDraw.Draw(img)
-        # A pulsing (attention) key gets a bright ring so a still PNG still reads
-        # as "look at me" — the real deck animates it.
-        if appearance.pulse:
-            draw.rectangle(
-                [2, 2, size - 3, size - 3],
-                outline=(255, 255, 255),
-                width=3,
-            )
-        if appearance.label:
-            draw_label(draw, size, appearance.label, label_color_for(appearance))
+        _paint_key_face(draw, size, appearance)
         return img
 
 
@@ -171,6 +162,38 @@ def _readable_text_color(bg: tuple[int, int, int]) -> tuple[int, int, int]:
     r, g, b = bg
     luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
     return (0, 0, 0) if luminance > 140 else (255, 255, 255)
+
+
+def _lighten(color: tuple[int, int, int], amt: float) -> tuple[int, int, int]:
+    """Blend ``color`` toward white by ``amt`` (0..1)."""
+    return tuple(round(c + (255 - c) * amt) for c in color)
+
+
+def draw_spinner(draw, size: int, phase: float, base_color, *, span_deg: int = 100) -> None:
+    """Draw a rotating arc hugging the key edge — a "working" spinner.
+
+    ``phase`` (0..1) sets the rotation; the arc is a light tint of the key's
+    ``base_color`` so it reads as motion against the fill without clashing with
+    the centred label (it rides the border, outside the label's margins).
+    """
+    inset = max(2, size // 24)
+    box = [inset, inset, size - 1 - inset, size - 1 - inset]
+    start = (phase * 360) % 360
+    draw.arc(
+        box,
+        start,
+        start + span_deg,
+        fill=_lighten(base_color, 0.8),
+        width=max(2, size // 20),
+    )
+
+
+def draw_question(draw, size: int, color) -> None:
+    """Draw a big centred ``?`` — the "needs you" glyph on an attention key."""
+    font = _label_font(int(size * 0.6))
+    bbox = draw.textbbox((0, 0), "?", font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.text(((size - tw) / 2 - bbox[0], (size - th) / 2 - bbox[1]), "?", font=font, fill=color)
 
 
 def label_color_for(appearance: KeyAppearance) -> tuple[int, int, int]:
@@ -225,3 +248,22 @@ def draw_label(draw, size: int, text: str, color, *, margin: int = 6) -> None:
     bbox = draw.textbbox((0, 0), text, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
     draw.text(((size - tw) / 2, (size - th) / 2 - bbox[1]), text, font=font, fill=color)
+
+
+def _paint_key_face(draw, size: int, appearance: KeyAppearance) -> None:
+    """Draw a key's foreground onto ``draw`` (fill already laid down). The single
+    source of truth shared by the virtual and hardware renderers:
+
+    - ATTENTION ("needs you"): a big blinking ``?`` (drawn while ``blink_on``);
+      no branch label — the glyph is the whole message.
+    - WORKING: a rotating spinner arc plus the branch label.
+    - everything else: just the branch label.
+    """
+    if appearance.pulse:  # attention
+        if appearance.blink_on:
+            draw_question(draw, size, (255, 255, 255))  # white "?" on the yellow
+        return
+    if appearance.spin is not None:  # working
+        draw_spinner(draw, size, appearance.spin, appearance.color)
+    if appearance.label:
+        draw_label(draw, size, appearance.label, label_color_for(appearance))

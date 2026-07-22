@@ -1,59 +1,78 @@
-"""The breathing-key animation: pure pulse math + frame modulation."""
+"""The key animations: blink (attention "?") + spin (working) rotation."""
 
 import pytest
 
 from streamdeckd.animation import (
-    PULSE_MAX,
-    PULSE_MIN,
-    PULSE_PERIOD_S,
+    BLINK_PERIOD_S,
+    SPIN_PERIOD_S,
+    SPIN_STEPS,
     animate_frame,
+    animation_kind,
+    blink_on,
     has_animation,
-    phase_at,
-    pulse_factor,
+    spin_phase,
 )
 from streamdeckd.state import KeyState, appearance_for
 
 
-def test_pulse_factor_endpoints_are_dim():
-    assert pulse_factor(0.0) == pytest.approx(PULSE_MIN)
-    assert pulse_factor(1.0) == pytest.approx(PULSE_MIN)
+# -- blink math ------------------------------------------------------------
 
 
-def test_pulse_factor_peak_is_full_at_half():
-    assert pulse_factor(0.5) == pytest.approx(PULSE_MAX)
+def test_blink_on_first_half_off_second_half():
+    assert blink_on(0.0) is True
+    assert blink_on(BLINK_PERIOD_S * 0.25) is True
+    assert blink_on(BLINK_PERIOD_S * 0.75) is False
+    assert blink_on(BLINK_PERIOD_S) is True  # wraps to the next cycle
 
 
-def test_pulse_factor_stays_in_range():
-    for i in range(101):
-        f = pulse_factor(i / 100)
-        assert PULSE_MIN - 1e-9 <= f <= PULSE_MAX + 1e-9
+# -- spin math -------------------------------------------------------------
 
 
-def test_phase_at_wraps_on_period():
-    assert phase_at(0.0) == pytest.approx(0.0)
-    assert phase_at(PULSE_PERIOD_S) == pytest.approx(0.0)
-    assert phase_at(PULSE_PERIOD_S / 2) == pytest.approx(0.5)
+def test_spin_phase_wraps_and_quantizes():
+    assert spin_phase(0.0) == pytest.approx(0.0)
+    assert spin_phase(SPIN_PERIOD_S) == pytest.approx(0.0)  # full revolution
+    for i in range(200):
+        p = spin_phase(i * 0.017)
+        assert p == pytest.approx(round(p * SPIN_STEPS) / SPIN_STEPS)
 
 
-def test_has_animation_only_when_a_key_pulses():
-    calm = [appearance_for(KeyState.WORKING), appearance_for(KeyState.DONE)]
-    assert not has_animation(calm)
-    assert has_animation(calm + [appearance_for(KeyState.ATTENTION)])
+# -- classification --------------------------------------------------------
 
 
-def test_animate_frame_dims_only_pulsing_keys():
-    working = appearance_for(KeyState.WORKING, "w")   # not pulsing
-    attention = appearance_for(KeyState.ATTENTION, "a")  # pulsing
-    out = animate_frame([working, attention], phase=0.0)  # dimmest
-    # Non-pulsing key is the very same object, untouched.
-    assert out[0] is working
-    # Pulsing key is dimmed toward black but keeps its flags/label.
-    assert out[1].color != attention.color
-    assert all(o <= b for o, b in zip(out[1].color, attention.color))
-    assert out[1].pulse is True and out[1].label == "a" and out[1].state is attention.state
+def test_animation_kind_per_state():
+    assert animation_kind(appearance_for(KeyState.ATTENTION)) == "blink"
+    assert animation_kind(appearance_for(KeyState.WORKING)) == "spin"
+    assert animation_kind(appearance_for(KeyState.DONE)) is None
+    assert animation_kind(appearance_for(KeyState.STARTING)) is None
 
 
-def test_animate_frame_full_brightness_at_peak():
-    attention = appearance_for(KeyState.ATTENTION)
-    out = animate_frame([attention], phase=0.5)  # PULSE_MAX == 1.0
-    assert out[0].color == attention.color
+def test_has_animation_true_for_working_or_attention():
+    assert not has_animation([appearance_for(KeyState.DONE)])
+    assert has_animation([appearance_for(KeyState.WORKING)])
+    assert has_animation([appearance_for(KeyState.ATTENTION)])
+
+
+# -- frame modulation ------------------------------------------------------
+
+
+def test_animate_frame_toggles_blink_on_attention():
+    attention = appearance_for(KeyState.ATTENTION, "a")
+    on = animate_frame([attention], elapsed_s=0.0)[0]
+    off = animate_frame([attention], elapsed_s=BLINK_PERIOD_S * 0.75)[0]
+    assert on.blink_on is True and off.blink_on is False
+    assert on.pulse is True and off.pulse is True  # still the attention key
+    assert on.color == attention.color  # blink doesn't touch the fill
+
+
+def test_animate_frame_stamps_spin_on_working_key():
+    working = appearance_for(KeyState.WORKING, "w")
+    assert working.spin is None
+    out = animate_frame([working], elapsed_s=SPIN_PERIOD_S / 4)[0]
+    assert out.spin is not None and 0.0 <= out.spin < 1.0
+    assert out.color == working.color and out.label == "w"
+
+
+def test_animate_frame_leaves_calm_keys_untouched():
+    done = appearance_for(KeyState.DONE, "d")
+    out = animate_frame([done], elapsed_s=0.3)
+    assert out[0] is done  # same object, no copy

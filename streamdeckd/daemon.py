@@ -29,7 +29,7 @@ from gsm.applescript import DeadSurface, Ghostty
 from gsm.manager import Manager, UnknownTag
 from gsm.registry import default_home
 
-from .animation import animate_frame, has_animation, phase_at
+from .animation import animate_frame, has_animation
 from .protocol import ProtocolError, parse_message
 from .renderer import Renderer, VirtualDeck
 from .state import ApplyResult, SessionModel, Slot
@@ -152,22 +152,23 @@ class Daemon:
 
     # -- animation ---------------------------------------------------------
 
-    def _tick_animation(self, phase: float | None = None) -> bool:
-        """Render one animated frame if any key is pulsing. Returns whether it
-        did (so the loop can idle when nothing needs motion). ``phase`` is
-        injectable for tests; otherwise derived from the monotonic clock."""
+    def _tick_animation(self, elapsed: float | None = None) -> bool:
+        """Render one animated frame if any key is animating. Returns whether it
+        did (so the loop can idle when nothing needs motion). ``elapsed`` (secs
+        since start) is injectable for tests; otherwise read from the monotonic
+        clock."""
         with self._lock:
             keys = self.model.snapshot_keys()
             if not has_animation(keys):
                 return False
-            if phase is None:
-                phase = phase_at(time.monotonic() - self._started_at)
-            self.renderer.render(animate_frame(keys, phase))
+            if elapsed is None:
+                elapsed = time.monotonic() - self._started_at
+            self.renderer.render(animate_frame(keys, elapsed))
             return True
 
     def _animation_loop(self) -> None:
-        """Background ticker: ~12 fps while a key breathes, a lazy poll otherwise
-        so a newly-ATTENTION key starts pulsing within a fraction of a second."""
+        """Background ticker: ~12 fps while a key animates, a lazy poll otherwise
+        so a newly-active key starts moving within a fraction of a second."""
         active_dt, idle_dt = 1 / 12, 0.2
         while not self._anim_stop.is_set():
             try:
