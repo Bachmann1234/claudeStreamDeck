@@ -188,12 +188,13 @@ def draw_spinner(draw, size: int, phase: float, base_color, *, span_deg: int = 1
     )
 
 
-def draw_question(draw, size: int, color) -> None:
-    """Draw a big centred ``?`` — the "needs you" glyph on an attention key."""
-    font = _label_font(int(size * 0.6))
-    bbox = draw.textbbox((0, 0), "?", font=font)
+def draw_glyph(draw, size: int, glyph: str, color, *, scale: float = 0.6) -> None:
+    """Draw a single big centred glyph (e.g. ``?`` for attention, ``+`` for the
+    launcher key) at ``scale`` of the key height."""
+    font = _label_font(int(size * scale))
+    bbox = draw.textbbox((0, 0), glyph, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    draw.text(((size - tw) / 2 - bbox[0], (size - th) / 2 - bbox[1]), "?", font=font, fill=color)
+    draw.text(((size - tw) / 2 - bbox[0], (size - th) / 2 - bbox[1]), glyph, font=font, fill=color)
 
 
 def label_color_for(appearance: KeyAppearance) -> tuple[int, int, int]:
@@ -254,14 +255,18 @@ def _paint_key_face(draw, size: int, appearance: KeyAppearance) -> None:
     """Draw a key's foreground onto ``draw`` (fill already laid down). The single
     source of truth shared by the virtual and hardware renderers:
 
+    - LAUNCHER: a big white ``+`` — the "new session" key.
     - ATTENTION ("needs you"): a big blinking ``?`` (drawn while ``blink_on``);
       no branch label — the glyph is the whole message.
     - WORKING: a rotating spinner arc plus the branch label.
     - everything else: just the branch label.
     """
+    if appearance.state is KeyState.LAUNCHER:
+        draw_glyph(draw, size, "+", (255, 255, 255), scale=0.7)
+        return
     if appearance.pulse:  # attention
         if appearance.blink_on:
-            draw_question(draw, size, (255, 255, 255))  # white "?" on the yellow
+            draw_glyph(draw, size, "?", (255, 255, 255))  # white "?" on the yellow
         return
     if appearance.spin is not None:  # working
         draw_spinner(draw, size, appearance.spin, appearance.color)

@@ -57,6 +57,30 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="disable the pulsing 'needs you' animation on the physical deck",
     )
+    launch = p.add_mutually_exclusive_group()
+    launch.add_argument(
+        "--launcher-key",
+        type=int,
+        default=None,
+        help="key index reserved as a '+' launcher that opens a new Ghostty "
+        "window (default: the last key)",
+    )
+    launch.add_argument(
+        "--no-launcher",
+        action="store_true",
+        help="don't reserve a launcher key; every key is available to sessions",
+    )
+    p.add_argument(
+        "--launch-command",
+        default=None,
+        help="command the launcher runs in the new window (default: none — just "
+        "a shell, so you can cd and start claude yourself)",
+    )
+    p.add_argument(
+        "--launch-cwd",
+        default=None,
+        help="working directory for a launched window (default: Ghostty's default)",
+    )
     p.add_argument(
         "--out-dir",
         default=None,
@@ -114,11 +138,20 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as e:
         log.error("could not open Stream Deck: %s", e)
         return 1
+    if args.no_launcher:
+        launcher_key = None
+    elif args.launcher_key is not None:
+        launcher_key = args.launcher_key
+    else:
+        launcher_key = renderer.key_count - 1  # default: the last key
     daemon = Daemon(
         manager=Manager(ghostty=Ghostty(args.target)),
         renderer=renderer,
         socket_path=args.socket,
         animate=not args.no_animate,
+        launcher_key=launcher_key,
+        launch_command=args.launch_command,
+        launch_cwd=args.launch_cwd,
     )
     # A physical press must reach the same focus path as {"press": N}.
     if hasattr(renderer, "on_press"):

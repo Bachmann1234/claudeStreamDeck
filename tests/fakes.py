@@ -16,11 +16,29 @@ class FakeGhostty:
     def __init__(self, live=("U1", "U2", "U3")):
         self.live = set(live)
         self.focused: list[str] = []
+        self.spawns: list[dict] = []
+        self.tabs = 0
+        self.windows_open = False   # does has_open_window() report a window?
+        self.tab_error = None       # set to an Exception to simulate no Accessibility
 
     def focus(self, uuid: str) -> None:
         self.focused.append(uuid)
         if uuid not in self.live:
             raise DeadSurface(f"gone: {uuid}", code=-1728)
+
+    def spawn_window(self, *, command=None, working_directory=None, **kw) -> str:
+        uuid = f"spawned-{len(self.spawns)}"
+        self.spawns.append({"command": command, "working_directory": working_directory})
+        self.live.add(uuid)
+        return uuid
+
+    def has_open_window(self) -> bool:
+        return self.windows_open
+
+    def open_new_tab(self) -> None:
+        if self.tab_error is not None:
+            raise self.tab_error
+        self.tabs += 1
 
     def kill(self, uuid: str) -> None:
         self.live.discard(uuid)

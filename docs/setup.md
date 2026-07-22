@@ -70,6 +70,13 @@ streamdeckd -v                    # auto-detects; opens the deck if present,
 - A **physical key press** takes the exact same path as `{"press": N}` on the
   socket: it focuses that session's Ghostty surface (needs a resolved UUID —
   see §6). No extra wiring.
+- The **last key is a `+` launcher** (indigo): pressing it opens a new place to
+  work — a **new tab** in Ghostty's front window if one is open, else a **new
+  window** — where you `cd` and start `claude` yourself. Opening a *tab* needs a
+  one-time macOS **Accessibility** grant (it's a synthesized `Cmd-T`); until
+  granted it silently falls back to a new window. Configure with `--launcher-key
+  N`, `--no-launcher`, `--launch-command CMD` (run a fixed command in a new
+  window instead of a shell), and `--launch-cwd DIR`.
 - Hardware notes for the tested board (Stream Deck Original, 15-key): keys are
   **72×72 JPEG, flipped both axes** — handled automatically by the library's
   `PILHelper`, so nothing downstream hard-codes the size. Presses did **not**

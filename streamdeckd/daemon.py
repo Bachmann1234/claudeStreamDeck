@@ -32,7 +32,7 @@ from gsm.registry import default_home
 from .animation import animate_frame, has_animation
 from .protocol import ProtocolError, parse_message
 from .renderer import Renderer, VirtualDeck
-from .state import ApplyResult, SessionModel, Slot
+from .state import ApplyResult, KeyState, SessionModel, Slot, appearance_for
 
 log = logging.getLogger("streamdeckd")
 
@@ -59,10 +59,24 @@ class Daemon:
         model: SessionModel | None = None,
         socket_path: Path | str | None = None,
         animate: bool = True,
+        launcher_key: int | None = None,
+        launch_command: str | None = None,
+        launch_cwd: str | None = None,
     ):
         self.manager = manager or Manager()
         self.renderer = renderer or VirtualDeck()
-        self.model = model or SessionModel(self.renderer.key_count)
+        # A launcher key (if any) is reserved so the model never assigns a
+        # session to it; the daemon paints it and handles its press itself.
+        self.launcher_key = launcher_key
+        if self.launcher_key is not None and not (
+            0 <= self.launcher_key < self.renderer.key_count
+        ):
+            self.launcher_key = None  # out of range -> just disable it
+        self.launch_command = launch_command
+        self.launch_cwd = launch_cwd
+        reserved = frozenset() if self.launcher_key is None else frozenset({self.launcher_key})
+        self.model = model or SessionModel(self.renderer.key_count, reserved=reserved)
+        self._launcher_appearance = appearance_for(KeyState.LAUNCHER)
         if self.model.key_count != self.renderer.key_count:
             raise ValueError(
                 "model.key_count and renderer.key_count must match "
@@ -147,8 +161,15 @@ class Daemon:
                 working_directory=slot.cwd,
             )
 
+    def _base_frame(self) -> list:
+        """The current frame from the model, with the launcher key stamped in."""
+        keys = self.model.snapshot_keys()
+        if self.launcher_key is not None:
+            keys[self.launcher_key] = self._launcher_appearance
+        return keys
+
     def _repaint(self) -> None:
-        self.renderer.render(self.model.snapshot_keys())
+        self.renderer.render(self._base_frame())
 
     # -- animation ---------------------------------------------------------
 
@@ -158,7 +179,7 @@ class Daemon:
         since start) is injectable for tests; otherwise read from the monotonic
         clock."""
         with self._lock:
-            keys = self.model.snapshot_keys()
+            keys = self._base_frame()
             if not has_animation(keys):
                 return False
             if elapsed is None:
@@ -200,7 +221,11 @@ class Daemon:
     def press(self, key_index: int) -> Slot | None:
         """Focus the session bound to a key. Returns the slot, or ``None`` if
         the key is blank or its surface has died (in which case the key is
-        released and repainted)."""
+        released and repainted). Pressing the launcher key spawns a new
+        session instead (returns ``None``)."""
+        if key_index == self.launcher_key:
+            self._launch()
+            return None
         with self._lock:
             slot = self.model.session_for_key(key_index)
             if slot is None:
@@ -232,6 +257,36 @@ class Daemon:
                 self._repaint()
                 return None
             return slot
+
+    def _launch(self) -> None:
+        """Open a new session for the user to work in.
+
+        Default (plain shell): a **new tab** in Ghostty's front window if one is
+        open, else a new window. A configured ``launch_command`` always gets its
+        own window (a Cmd-T tab can't carry a command). Runs off the lock — it
+        only touches Ghostty, not the model — so a slow spawn never blocks state
+        updates. The new session registers its own key when its ``SessionStart``
+        hook fires; the daemon doesn't track it here."""
+        ghostty = self.manager.ghostty
+        if not self.launch_command:
+            try:
+                if ghostty.has_open_window():
+                    ghostty.open_new_tab()
+                    log.info("launcher: opened a new tab in Ghostty")
+                    return
+            except Exception:
+                log.info("launcher: couldn't open a tab (grant Accessibility to "
+                         "enable tabs) — opening a new window instead")
+        try:
+            uuid = ghostty.spawn_window(
+                command=self.launch_command, working_directory=self.launch_cwd
+            )
+            log.info("launcher: opened a new window (%s)%s -> surface %s",
+                     self.launch_command or "shell",
+                     f" in {self.launch_cwd}" if self.launch_cwd else "",
+                     (uuid or "?")[:8])
+        except Exception:  # pragma: no cover - never crash the press/HID thread
+            log.exception("launcher: failed to open a new window")
 
     # -- socket server -----------------------------------------------------
 

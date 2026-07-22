@@ -39,6 +39,7 @@ class KeyState(str, Enum):
     WORKING = "working"    # prompt submitted / running a tool
     ATTENTION = "attention"  # Notification: needs the human
     DONE = "done"          # Stop: response finished
+    LAUNCHER = "launcher"  # display-only: a reserved "new session" (+) key
 
 
 # Sentinel returned by :func:`resolve_state` meaning "release this session's
@@ -115,6 +116,7 @@ APPEARANCE: dict[KeyState, KeyAppearance] = {
     KeyState.WORKING: KeyAppearance(KeyState.WORKING, (0, 90, 200)),
     KeyState.ATTENTION: KeyAppearance(KeyState.ATTENTION, (235, 185, 0), pulse=True),
     KeyState.DONE: KeyAppearance(KeyState.DONE, (0, 160, 70)),
+    KeyState.LAUNCHER: KeyAppearance(KeyState.LAUNCHER, (60, 50, 95)),  # indigo "+"
 }
 
 
@@ -155,6 +157,7 @@ STATE_PRIORITY: dict[KeyState, int] = {
     KeyState.STARTING: 1,
     KeyState.DONE: 0,
     KeyState.EMPTY: -1,
+    KeyState.LAUNCHER: -1,  # never a session; here only to keep lookups total
 }
 
 
@@ -231,11 +234,21 @@ class SessionModel:
     session (oldest first) is promoted back onto it.
     """
 
-    def __init__(self, key_count: int = 15, *, evict_finished_when_full: bool = True):
+    def __init__(
+        self,
+        key_count: int = 15,
+        *,
+        evict_finished_when_full: bool = True,
+        reserved: frozenset[int] | set[int] = frozenset(),
+    ):
         if key_count < 1:
             raise ValueError("key_count must be >= 1")
         self.key_count = key_count
         self.evict_finished_when_full = evict_finished_when_full
+        # Keys the model must never allocate to a session (e.g. a launcher key
+        # the daemon paints itself). Sessions never land here, so eviction and
+        # promotion — which only consider *keyed* sessions — ignore them too.
+        self.reserved = frozenset(reserved)
         self._slots: dict[str, Slot] = {}
         self._seq = 0
 
@@ -263,7 +276,7 @@ class SessionModel:
     def _next_free_key(self) -> int | None:
         used = self._used_keys()
         for i in range(self.key_count):
-            if i not in used:
+            if i not in used and i not in self.reserved:
                 return i
         return None
 

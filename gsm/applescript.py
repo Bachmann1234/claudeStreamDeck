@@ -208,6 +208,31 @@ class Ghostty:
         )
         return self._tell(body).strip()
 
+    def has_open_window(self) -> bool:
+        """True if Ghostty has at least one open window/surface. Never launches
+        Ghostty (guards on :meth:`is_running` first)."""
+        if not self.is_running():
+            return False
+        try:
+            return int(self._tell("return (count of terminals)").strip() or "0") > 0
+        except (GhosttyScriptError, ValueError):
+            return False
+
+    def open_new_tab(self) -> None:
+        """Open a new tab in Ghostty's front window via a ``Cmd-T`` keystroke.
+
+        Ghostty's AppleScript dictionary can create *windows* but not *tabs*, so
+        a tab means synthesizing the keystroke through System Events — which
+        needs a one-time macOS **Accessibility** grant (distinct from the
+        Automation grant used elsewhere). Raises :class:`GhosttyScriptError` if
+        that grant is missing, so callers can fall back to a new window.
+        """
+        self._run(
+            f'tell application "{_as_str_inner(self._target)}" to activate\n'
+            "delay 0.1\n"  # let Ghostty come frontmost before the keystroke lands
+            'tell application "System Events" to keystroke "t" using command down'
+        )
+
     # -- focus -------------------------------------------------------------
 
     def focus(self, uuid: str) -> None:

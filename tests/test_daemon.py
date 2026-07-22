@@ -293,3 +293,72 @@ def test_virtual_renderer_never_animates(tmp_path):
         animate=True,
     )
     assert d._animate is False
+
+
+# -- launcher key ----------------------------------------------------------
+
+
+def _launcher_daemon(tmp_path, *, launcher_key=14, launch_command=None):
+    ghostty = FakeGhostty()
+    manager = Manager(ghostty=ghostty, registry=Registry(path=tmp_path / "r.json"))
+    renderer = RecordingRenderer(key_count=15)
+    d = Daemon(
+        manager=manager,
+        renderer=renderer,
+        socket_path=tmp_path / "d.sock",
+        launcher_key=launcher_key,
+        launch_command=launch_command,
+        launch_cwd="/w",
+    )
+    return d, ghostty, renderer
+
+
+def test_launcher_key_is_painted(tmp_path):
+    from streamdeckd.state import KeyState
+
+    d, _, renderer = _launcher_daemon(tmp_path)
+    d._repaint()
+    assert renderer.last[14].state is KeyState.LAUNCHER
+
+
+def test_launcher_opens_a_tab_when_a_window_is_open(tmp_path):
+    d, ghostty, _ = _launcher_daemon(tmp_path)  # plain shell
+    ghostty.windows_open = True
+    assert d.press(14) is None
+    assert ghostty.tabs == 1 and ghostty.spawns == []  # tab, not a new window
+
+
+def test_launcher_opens_a_window_when_none_is_open(tmp_path):
+    d, ghostty, _ = _launcher_daemon(tmp_path)  # plain shell, no window open
+    d.press(14)
+    assert ghostty.tabs == 0
+    assert ghostty.spawns == [{"command": None, "working_directory": "/w"}]
+
+
+def test_launcher_falls_back_to_window_if_tab_fails(tmp_path):
+    d, ghostty, _ = _launcher_daemon(tmp_path)
+    ghostty.windows_open = True
+    ghostty.tab_error = RuntimeError("Accessibility not granted")
+    d.press(14)
+    assert ghostty.spawns == [{"command": None, "working_directory": "/w"}]
+
+
+def test_launcher_command_always_uses_a_window(tmp_path):
+    # A fixed command can't ride a Cmd-T tab, so it always spawns a window.
+    d, ghostty, _ = _launcher_daemon(tmp_path, launch_command="claude")
+    ghostty.windows_open = True
+    d.press(14)
+    assert ghostty.tabs == 0
+    assert ghostty.spawns == [{"command": "claude", "working_directory": "/w"}]
+
+
+def test_launcher_key_reserved_from_sessions(tmp_path):
+    d, _, _ = _launcher_daemon(tmp_path, launcher_key=0)  # reserve the first key
+    d.handle_line(_line(session_id="a", event="SessionStart", cwd="/w/r"))
+    assert d.model.get("a").key_index != 0  # session skipped the launcher key
+
+
+def test_out_of_range_launcher_is_disabled(tmp_path):
+    d, ghostty, _ = _launcher_daemon(tmp_path, launcher_key=99)
+    assert d.launcher_key is None
+    assert d.press(99) is None and ghostty.spawns == []  # no spawn, no crash

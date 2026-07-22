@@ -251,6 +251,17 @@ def test_key_count_must_be_positive():
         SessionModel(key_count=0)
 
 
+def test_reserved_key_is_never_allocated():
+    m = SessionModel(key_count=3, reserved={2})
+    m.apply(_msg("a", "SessionStart"))
+    m.apply(_msg("b", "SessionStart"))
+    assert {m.get("a").key_index, m.get("b").key_index} == {0, 1}
+    # Only 2 usable keys -> a third session overflows rather than taking key 2.
+    r = m.apply(_msg("c", "SessionStart"))
+    assert r.action == "overflow" and m.get("c").key_index is None
+    assert m.session_for_key(2) is None
+
+
 # -- branch labels ---------------------------------------------------------
 
 

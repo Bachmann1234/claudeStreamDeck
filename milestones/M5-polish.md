@@ -21,8 +21,12 @@
         keyed session (ATTENTION > WORKING > STARTING > DONE) and parks it;
         a freed key promotes the best-ranked parked session back. Paging is
         still a possible future addition for very high session counts.*
-- [ ] **Reserved keys / controls** (optional): e.g. a key to blank/reset, a key
-      to cycle pages, a "most recent attention" jump key.
+- [x] **Reserved keys / controls:** a **launcher key** (the last key by default,
+      a `+`) opens a new session — a new tab in Ghostty's front window if one is
+      open (synthesized `Cmd-T`, needs Accessibility), else a new window. The key
+      is reserved so no session is ever assigned to it. `--launcher-key` /
+      `--no-launcher` / `--launch-command` / `--launch-cwd`. *(2026-07-21)*
+      (A blank/reset key or "jump to newest attention" key remain possible.)
 - [ ] **Resilience:**
   - [ ] Daemon auto-recovers if the deck is unplugged/replugged.
   - [ ] Reconcile state on daemon restart (sessions may already be running —
