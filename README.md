@@ -10,6 +10,9 @@ split focused. No deck attached? The same daemon paints a file-backed
 
 Works against **stock Ghostty ≥ 1.3.0** on macOS — no terminal fork, no tmux.
 
+![The deck live: two sessions working (teal, spinner), one waiting on a human
+(coral ?), and the + launcher key](./docs/images/deck-live.jpg)
+
 ## How it works
 
 ```
