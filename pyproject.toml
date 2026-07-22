@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-streamdeck-gsm"
+version = "0.1.0"
+description = "Tier 0 Ghostty Claude-session manager (spawn/focus/adopt/status by surface identity)"
+requires-python = ">=3.10"
+dependencies = ["pillow>=9"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+# The USB HID driver for a physical board. Optional: the daemon imports it
+# lazily and only under `--deck`, so headless installs don't need it.
+# Also requires the `hidapi` system lib (macOS: `brew install hidapi`).
+deck = ["streamdeck>=0.9"]
+
+[project.scripts]
+gsm = "gsm.cli:main"
+streamdeckd = "streamdeckd.cli:main"
+claudestreamdeck-hook = "streamdeckd.hook:main"
+
+[tool.setuptools]
+packages = ["gsm", "streamdeckd"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

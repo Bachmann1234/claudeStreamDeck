@@ -55,7 +55,7 @@ surface.
 |-----------------------------|--------------------------------|--------------------|
 | `SessionStart`              | claim a free key               | dim / labeled      |
 | `UserPromptSubmit`, `PreToolUse` | working                   | blue (or animated) |
-| `Notification`              | needs you (question/permission)| pulsing yellow     |
+| `Notification`              | needs you (question/permission)| yellow, blinking `?` |
 | `Stop`                      | response finished / done       | green              |
 | `SessionEnd`                | release the key                | blank              |
 
@@ -93,11 +93,29 @@ step toward the next.
   scopes is now an **optional stretch track**, not required for the core tool.
 
 ## Open questions / decisions to revisit
-- Transport between hooks and daemon: unix socket vs. watched JSON dir vs. tiny
-  local HTTP endpoint. (Leaning unix socket — simple, local, no ports.)
-- What to do when there are more than 15 concurrent sessions (paging? LRU evict a
-  finished session's key?).
-- Whether to depend on tmux for session survival across Ghostty restarts, or
-  accept that a UUID (and its key) dies with the surface.
-- Which process sends the Apple events (the Python daemon directly vs. a helper)
-  — determines where the one-time TCC Automation grant lands.
+- ~~Transport between hooks and daemon~~ **Decided: unix socket** at
+  `~/.claudeStreamDeck/streamdeckd.sock`, newline-delimited JSON. Built in M2
+  (`streamdeckd/daemon.py`).
+- ~~Which process sends the Apple events~~ **Decided: split.** The **hook**
+  resolves its own surface UUID once on `SessionStart` (focused-surface + cwd
+  cross-check over read-only `osascript` — see
+  [`docs/correlation-rationale.md`](./docs/correlation-rationale.md)); the
+  **daemon** sends the focus event on a key press. The one-time TCC Automation
+  grant therefore lands on both, each on first use.
+- ~~What to do when there are more than 15 concurrent sessions~~ **Decided:
+  priority-based LRU eviction** (M5, `SessionModel`). When the deck is full a
+  new/urgent session evicts the least-recently-active *lower-priority* session
+  (ATTENTION > WORKING > STARTING > DONE) and parks it; a freed key promotes the
+  best-ranked parked session back. Paging remains a possible future addition for
+  very high counts.
+- ~~Whether to depend on tmux for session survival across Ghostty restarts~~
+  **Decided: no tmux.** A surface UUID is Ghostty's and dies with the surface —
+  tmux doesn't preserve it (a reattached session lands in a *new* surface with a
+  *new* UUID). Worse, `tmux attach` fires no `SessionStart`, and re-resolution
+  only happens there, so tmux would leave a binding stale *silently*. Without it,
+  a restart cleanly ends the session; the next `claude` re-registers on
+  `SessionStart`, and the daemon prunes a dead binding on the first failed focus
+  — it self-heals. If survival-across-restart ever matters, the right fix is
+  **re-resolution on activity** (re-send the UUID on `UserPromptSubmit`, or a
+  periodic daemon reconciler, when the current binding is dead) — a small change
+  to the correlation layer, not a per-session workflow dependency.
