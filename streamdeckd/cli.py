@@ -82,6 +82,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="working directory for a launched window (default: Ghostty's default)",
     )
     p.add_argument(
+        "--no-reap",
+        action="store_true",
+        help="don't auto-blank keys whose Ghostty surfaces have been closed",
+    )
+    p.add_argument(
         "--out-dir",
         default=None,
         help=f"virtual-deck output dir (default: {default_virtualdeck_dir()})",
@@ -152,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
         launcher_key=launcher_key,
         launch_command=args.launch_command,
         launch_cwd=args.launch_cwd,
+        reap=not args.no_reap,
     )
     # A physical press must reach the same focus path as {"press": N}.
     if hasattr(renderer, "on_press"):

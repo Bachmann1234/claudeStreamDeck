@@ -28,6 +28,11 @@
       `--no-launcher` / `--launch-command` / `--launch-cwd`. *(2026-07-21)*
       (A blank/reset key or "jump to newest attention" key remain possible.)
 - [ ] **Resilience:**
+  - [x] **Auto-heal a dead binding** *(2026-07-21)*: a background **reaper**
+        blanks any key whose Ghostty surface has closed (an abrupt close fires no
+        `SessionEnd`), and the **hook re-resolves the UUID on `UserPromptSubmit`**
+        (the model fills it only if empty) so a session that couldn't correlate
+        at start is fixed on its next prompt. `--no-reap` disables the reaper.
   - [ ] Daemon auto-recovers if the deck is unplugged/replugged.
   - [ ] Reconcile state on daemon restart (sessions may already be running —
         rebuild from a state file or just start fresh and repopulate on next

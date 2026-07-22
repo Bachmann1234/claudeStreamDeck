@@ -384,7 +384,12 @@ class SessionModel:
             existing.label = _default_label(msg)
         if msg.branch:
             existing.branch = msg.branch
-        if msg.uuid:
+        # Fill the surface UUID only if we don't already have one: a re-resolution
+        # on activity (the hook re-sends it on UserPromptSubmit) heals a session
+        # that couldn't be correlated at SessionStart, but never overwrites a
+        # good binding — a live surface's UUID is stable, so a *different* UUID
+        # here would be a same-cwd sibling we shouldn't clobber onto this session.
+        if msg.uuid and not existing.uuid:
             existing.uuid = msg.uuid
         if msg.tty:
             existing.tty = msg.tty

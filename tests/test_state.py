@@ -301,6 +301,24 @@ def test_snapshot_label_falls_back_to_repo_when_no_branch():
     assert m.snapshot_keys()[0].label == "api-ser"  # repo clipped the same way
 
 
+def test_uuid_filled_on_later_message_when_empty():
+    # Heal-on-activity: a session that couldn't resolve at start gets its UUID
+    # from a later re-resolution (the hook re-sends it on UserPromptSubmit).
+    m = SessionModel()
+    m.apply(_msg("a", "SessionStart", cwd="/w"))
+    assert m.get("a").uuid is None
+    m.apply(_msg("a", "UserPromptSubmit", uuid="U9"))
+    assert m.get("a").uuid == "U9"
+
+
+def test_uuid_not_overwritten_once_set():
+    # A different UUID on a later message is a same-cwd sibling — never clobber.
+    m = SessionModel()
+    m.apply(_msg("a", "SessionStart", uuid="U1", cwd="/w"))
+    m.apply(_msg("a", "UserPromptSubmit", uuid="U2"))
+    assert m.get("a").uuid == "U1"
+
+
 def test_branch_updates_on_later_message():
     m = SessionModel()
     m.apply(_msg("a", "SessionStart", branch="main"))

@@ -34,6 +34,10 @@ from .state import RELEASE, KeyState, resolve_state
 SOCKET_ENV = "STREAMDECKD_SOCKET"
 TARGET_ENV = "STREAMDECKD_GHOSTTY"  # override the Ghostty app name/path
 
+# Events on which the hook resolves (or re-resolves) its Ghostty surface UUID.
+# Both fire while this session's surface is frontmost.
+_RESOLVE_EVENTS = frozenset({"SessionStart", "UserPromptSubmit"})
+
 
 def _log(message: str) -> None:
     """Append one diagnostic line next to the socket. Never raises."""
@@ -206,11 +210,16 @@ def build_line(event: dict, *, target: str = "Ghostty", resolve=True) -> str | N
     uuid: str | None = None
     branch: str | None = None
 
-    if resolve and hook_event == "SessionStart":
+    # Resolve the surface UUID on SessionStart *and* on UserPromptSubmit. On a
+    # prompt you're focused in that surface, so re-resolving there heals a
+    # binding that couldn't be pinned at start (the daemon only fills it if
+    # empty). The git branch is looked up once, on SessionStart.
+    if resolve and hook_event in _RESOLVE_EVENTS:
         uuid = resolve_uuid(cwd, target=target)
-        branch = _git_branch(cwd)
+        if hook_event == "SessionStart":
+            branch = _git_branch(cwd)
         _log(
-            f"SessionStart {session_id[:8]} cwd={cwd!r} "
+            f"{hook_event} {session_id[:8]} cwd={cwd!r} "
             f"-> uuid={uuid!r} branch={branch!r}"
         )
 

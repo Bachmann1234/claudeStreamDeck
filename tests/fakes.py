@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from gsm.applescript import DeadSurface
 
 
@@ -20,6 +22,14 @@ class FakeGhostty:
         self.tabs = 0
         self.windows_open = False   # does has_open_window() report a window?
         self.tab_error = None       # set to an Exception to simulate no Accessibility
+        self.running = True         # is_running() result (the reaper gates on it)
+
+    def is_running(self) -> bool:
+        return self.running
+
+    def list_terminals(self):
+        """Live surfaces, as objects exposing ``.uuid`` (what the reaper reads)."""
+        return [SimpleNamespace(uuid=u) for u in sorted(self.live)]
 
     def focus(self, uuid: str) -> None:
         self.focused.append(uuid)

@@ -62,6 +62,8 @@ class Daemon:
         launcher_key: int | None = None,
         launch_command: str | None = None,
         launch_cwd: str | None = None,
+        reap: bool = True,
+        reap_interval: float = 8.0,
     ):
         self.manager = manager or Manager()
         self.renderer = renderer or VirtualDeck()
@@ -91,6 +93,13 @@ class Daemon:
         self._anim_stop = threading.Event()
         self._anim_thread: threading.Thread | None = None
         self._started_at = time.monotonic()
+        # Reaper: periodically blank keys whose surfaces have died (an abrupt
+        # tab/window close fires no SessionEnd), so a key never lingers on a
+        # session that's gone.
+        self._reap = reap
+        self._reap_interval = reap_interval
+        self._reap_stop = threading.Event()
+        self._reap_thread: threading.Thread | None = None
 
     # -- message handling --------------------------------------------------
 
@@ -216,6 +225,65 @@ class Daemon:
         if thread is not None:
             thread.join(timeout=1.0)
 
+    # -- reaper: blank keys for dead surfaces ------------------------------
+
+    def _reap_dead_surfaces(self) -> int:
+        """Blank keys whose bound surface is no longer alive. Returns the count.
+
+        Conservative on purpose: it only reaps a session when Ghostty is
+        confirmed running *and* that session's UUID is absent from the live
+        surface list — a positive "this one is gone", never an assumption. If
+        Ghostty can't be reached (quit, or a permission hiccup) it does nothing,
+        so a transient blip can't wrongly blank live sessions. Sessions with no
+        resolved UUID yet are left alone (nothing to check)."""
+        ghostty = self.manager.ghostty
+        try:
+            if not ghostty.is_running():
+                return 0  # can't confirm liveness without launching Ghostty -> skip
+            live = {t.uuid for t in ghostty.list_terminals()}
+        except Exception:
+            return 0  # transient query failure -> don't reap this cycle
+        with self._lock:
+            dead = [s.session_id for s in self.model.slots()
+                    if s.uuid and s.uuid not in live]
+            for sid in dead:
+                self.model.remove(sid)
+                self.manager.release(sid)
+            if dead:
+                self._repaint()
+        if dead:
+            log.info("reaper: blanked %d key(s) whose surfaces are gone", len(dead))
+        return len(dead)
+
+    def _reconcile_loop(self) -> None:
+        """Background reaper tick. Only queries Ghostty when at least one key is
+        bound to a UUID — an idle deck costs nothing."""
+        while not self._reap_stop.wait(self._reap_interval):
+            try:
+                with self._lock:
+                    has_bound = any(s.uuid for s in self.model.slots())
+                if has_bound:
+                    self._reap_dead_surfaces()
+            except Exception:  # pragma: no cover - a hiccup must not kill the loop
+                log.exception("reaper tick failed")
+
+    def _start_reaper(self) -> None:
+        if not self._reap or self._reap_thread is not None:
+            return
+        self._reap_stop.clear()
+        self._reap_thread = threading.Thread(
+            target=self._reconcile_loop, name="streamdeckd-reaper", daemon=True
+        )
+        self._reap_thread.start()
+        log.info("reaper started (blanks keys for closed surfaces every %.0fs)",
+                 self._reap_interval)
+
+    def _stop_reaper(self) -> None:
+        self._reap_stop.set()
+        thread, self._reap_thread = self._reap_thread, None
+        if thread is not None:
+            thread.join(timeout=1.0)
+
     # -- keypress -> focus -------------------------------------------------
 
     def press(self, key_index: int) -> Slot | None:
@@ -311,6 +379,7 @@ class Daemon:
         with self._lock:
             self._repaint()  # blank frame so a reader sees a coherent deck
         self._start_animation()
+        self._start_reaper()
         log.info("streamdeckd listening on %s (%d keys)",
                  self.socket_path, self.model.key_count)
         try:
@@ -355,6 +424,7 @@ class Daemon:
 
     def _teardown_socket(self) -> None:
         self._stop_animation()
+        self._stop_reaper()
         try:
             if self._server is not None:
                 self._server.server_close()

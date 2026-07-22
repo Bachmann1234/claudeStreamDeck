@@ -178,6 +178,11 @@ focused. Two things to know:
   put. Verified 2026-07-21; details in `docs/tier0-validation-findings.md`.
   (Native-**fullscreen** windows on their own Space are the one case that still
   won't switch regardless — a deferred, niche limitation.)
+- **Self-healing.** A key never lingers on a session that's gone: a background
+  **reaper** (every ~8 s) blanks any key whose Ghostty surface has closed — even
+  on an abrupt close that fires no `SessionEnd`. `--no-reap` disables it. And if
+  a session couldn't be correlated at `SessionStart` (ambiguous focus), the hook
+  **re-resolves its UUID on your next prompt** and the daemon fills it in.
 
 ## 7. Environment variables
 

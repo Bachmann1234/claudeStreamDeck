@@ -174,6 +174,20 @@ def test_build_line_includes_branch_on_sessionstart(monkeypatch):
     assert msg.uuid == "U-1"
 
 
+def test_build_line_reresolves_uuid_on_userpromptsubmit(monkeypatch):
+    # Heal-on-activity: UserPromptSubmit re-resolves the surface UUID (the
+    # session is focused when you submit), but does NOT re-run the git lookup.
+    monkeypatch.setattr(hook, "resolve_uuid", lambda *a, **k: "U-RE")
+    monkeypatch.setattr(hook, "_git_branch", lambda *a, **k: "should-not-run")
+    line = hook.build_line(
+        {"session_id": "abc", "hook_event_name": "UserPromptSubmit", "cwd": "/w"},
+        resolve=True,
+    )
+    msg = parse_message(line)
+    assert msg.uuid == "U-RE"
+    assert msg.branch is None  # branch is resolved only on SessionStart
+
+
 def test_build_line_omits_branch_off_sessionstart(monkeypatch):
     # branch is resolved only on SessionStart; other events carry no branch.
     def fail(*a, **k):  # pragma: no cover - must not be called

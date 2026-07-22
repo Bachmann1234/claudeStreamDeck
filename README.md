@@ -114,8 +114,8 @@ step toward the next.
   *new* UUID). Worse, `tmux attach` fires no `SessionStart`, and re-resolution
   only happens there, so tmux would leave a binding stale *silently*. Without it,
   a restart cleanly ends the session; the next `claude` re-registers on
-  `SessionStart`, and the daemon prunes a dead binding on the first failed focus
-  — it self-heals. If survival-across-restart ever matters, the right fix is
-  **re-resolution on activity** (re-send the UUID on `UserPromptSubmit`, or a
-  periodic daemon reconciler, when the current binding is dead) — a small change
-  to the correlation layer, not a per-session workflow dependency.
+  `SessionStart`, and the daemon self-heals two ways (both built): the **hook
+  re-resolves the UUID on `UserPromptSubmit`** (the daemon fills it only if
+  empty), and a **background reaper** blanks any key whose surface has died. So a
+  session that failed to correlate at start is fixed on its next prompt, and a
+  key never lingers on a closed surface — no tmux needed.

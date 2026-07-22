@@ -362,3 +362,46 @@ def test_out_of_range_launcher_is_disabled(tmp_path):
     d, ghostty, _ = _launcher_daemon(tmp_path, launcher_key=99)
     assert d.launcher_key is None
     assert d.press(99) is None and ghostty.spawns == []  # no spawn, no crash
+
+
+# -- reaper (auto-heal) ----------------------------------------------------
+
+
+def _reaper_daemon(tmp_path):
+    ghostty = FakeGhostty()  # U1, U2, U3 live
+    manager = Manager(ghostty=ghostty, registry=Registry(path=tmp_path / "r.json"))
+    renderer = RecordingRenderer()
+    d = Daemon(manager=manager, renderer=renderer, socket_path=tmp_path / "d.sock",
+               launcher_key=None)
+    return d, ghostty, renderer
+
+
+def test_reaper_blanks_key_when_surface_dies(tmp_path):
+    from streamdeckd.state import KeyState
+
+    d, ghostty, renderer = _reaper_daemon(tmp_path)
+    d.handle_line(_line(session_id="a", event="SessionStart", uuid="U1", cwd="/w"))
+    key = d.model.get("a").key_index
+    assert key is not None
+    ghostty.kill("U1")  # the surface goes away with no SessionEnd
+    assert d._reap_dead_surfaces() == 1
+    assert d.model.get("a") is None            # session dropped
+    assert renderer.last[key].state is KeyState.EMPTY  # key blanked
+
+
+def test_reaper_keeps_live_and_unresolved_sessions(tmp_path):
+    d, ghostty, _ = _reaper_daemon(tmp_path)
+    d.handle_line(_line(session_id="a", event="SessionStart", uuid="U1", cwd="/w"))
+    d.handle_line(_line(session_id="b", event="SessionStart", cwd="/w2"))  # no uuid
+    assert d._reap_dead_surfaces() == 0
+    assert d.model.get("a") is not None and d.model.get("b") is not None
+
+
+def test_reaper_skips_when_ghostty_not_running(tmp_path):
+    # Can't confirm liveness -> reap nothing (never blank live sessions on a blip).
+    d, ghostty, _ = _reaper_daemon(tmp_path)
+    d.handle_line(_line(session_id="a", event="SessionStart", uuid="U1", cwd="/w"))
+    ghostty.kill("U1")
+    ghostty.running = False
+    assert d._reap_dead_surfaces() == 0
+    assert d.model.get("a") is not None
