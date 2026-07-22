@@ -11,11 +11,11 @@ State machine (README's state -> key table):
 ===============  ==================================  ==================
 Hook event       Meaning                             Key appearance
 ===============  ==================================  ==================
-SessionStart     claim a free key                    dim / labeled
-UserPromptSubmit working                             blue
-PreToolUse       working                             blue
-Notification     needs you (question / permission)   yellow, blinking "?"
-Stop             response finished / done            green
+SessionStart     claim a free key                    cream / labeled
+UserPromptSubmit working                             teal + spinner
+PreToolUse       working                             teal + spinner
+Notification     needs you (question / permission)   coral, blinking "?"
+Stop             response finished / done            amber
 SessionEnd       release the key                     blank
 ===============  ==================================  ==================
 """
@@ -112,11 +112,11 @@ class KeyAppearance:
 # deck just records the flag.
 APPEARANCE: dict[KeyState, KeyAppearance] = {
     KeyState.EMPTY: KeyAppearance(KeyState.EMPTY, (0, 0, 0)),
-    KeyState.STARTING: KeyAppearance(KeyState.STARTING, (60, 60, 72)),
-    KeyState.WORKING: KeyAppearance(KeyState.WORKING, (0, 90, 200)),
-    KeyState.ATTENTION: KeyAppearance(KeyState.ATTENTION, (235, 185, 0), pulse=True),
-    KeyState.DONE: KeyAppearance(KeyState.DONE, (0, 160, 70)),
-    KeyState.LAUNCHER: KeyAppearance(KeyState.LAUNCHER, (60, 50, 95)),  # indigo "+"
+    KeyState.STARTING: KeyAppearance(KeyState.STARTING, (245, 239, 224)),  # cream #F5EFE0
+    KeyState.WORKING: KeyAppearance(KeyState.WORKING, (18, 140, 140)),  # teal #128C8C
+    KeyState.ATTENTION: KeyAppearance(KeyState.ATTENTION, (255, 111, 89), pulse=True),  # coral #FF6F59
+    KeyState.DONE: KeyAppearance(KeyState.DONE, (217, 164, 65)),  # amber #D9A441
+    KeyState.LAUNCHER: KeyAppearance(KeyState.LAUNCHER, (16, 74, 74)),  # deep teal "+"
 }
 
 

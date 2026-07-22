@@ -266,7 +266,7 @@ def _paint_key_face(draw, size: int, appearance: KeyAppearance) -> None:
         return
     if appearance.pulse:  # attention
         if appearance.blink_on:
-            draw_glyph(draw, size, "?", (255, 255, 255))  # white "?" on the yellow
+            draw_glyph(draw, size, "?", (0, 0, 0))  # black "?" pops on the coral
         return
     if appearance.spin is not None:  # working
         draw_spinner(draw, size, appearance.spin, appearance.color)

@@ -53,10 +53,10 @@ surface.
 
 | Claude Code hook            | Meaning                        | Key appearance     |
 |-----------------------------|--------------------------------|--------------------|
-| `SessionStart`              | claim a free key               | dim / labeled      |
-| `UserPromptSubmit`, `PreToolUse` | working                   | blue (or animated) |
-| `Notification`              | needs you (question/permission)| yellow, blinking `?` |
-| `Stop`                      | response finished / done       | green              |
+| `SessionStart`              | claim a free key               | cream / labeled    |
+| `UserPromptSubmit`, `PreToolUse` | working                   | teal + spinner     |
+| `Notification`              | needs you (question/permission)| coral, blinking `?` |
+| `Stop`                      | response finished / done       | amber              |
 | `SessionEnd`                | release the key                | blank              |
 
 **Note:** `Notification` (needs attention) and `Stop` (done) are the reliable

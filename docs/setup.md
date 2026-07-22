@@ -63,14 +63,14 @@ streamdeckd -v                    # auto-detects; opens the deck if present,
 ```
 
 - On the physical deck, keys **animate**: an `ATTENTION` ("needs you") key
-  blinks a white **`?`** on yellow (~0.9 s/cycle), and a `WORKING` key shows a
+  blinks a black **`?`** on coral (~0.9 s/cycle), and a `WORKING` key shows a
   spinner arc rotating around its edge (~1.1 s/revolution). `--no-animate` turns
   both off. The virtual deck stays static (a still PNG can't move) — it shows a
   steady `?` on attention keys.
 - A **physical key press** takes the exact same path as `{"press": N}` on the
   socket: it focuses that session's Ghostty surface (needs a resolved UUID —
   see §6). No extra wiring.
-- The **last key is a `+` launcher** (indigo): pressing it opens a new place to
+- The **last key is a `+` launcher** (deep teal): pressing it opens a new place to
   work — a **new tab** in Ghostty's front window if one is open, else a **new
   window** — where you `cd` and start `claude` yourself. Opening a *tab* needs a
   one-time macOS **Accessibility** grant (it's a synthesized `Cmd-T`); until
@@ -115,8 +115,8 @@ tile stamped with its key index (so key `3` maps to `{"press": 3}`).
 }
 ```
 
-State → color: `starting` dim grey · `working` blue (spinner) · `attention`
-yellow (blinking `?`) · `done` green · `empty` black. (See the README table.)
+State → color: `starting` cream · `working` teal (spinner) · `attention`
+coral (blinking `?`) · `done` amber · `empty` black. (See the README table.)
 
 ## 4. Drive it by hand (no hooks yet)
 
@@ -125,9 +125,9 @@ The socket speaks newline-delimited JSON. A session's whole life in four lines:
 ```bash
 S=~/.claudeStreamDeck/streamdeckd.sock
 printf '{"session_id":"demo","event":"SessionStart","uuid":"","cwd":"'"$PWD"'"}\n' | nc -U "$S"
-printf '{"session_id":"demo","event":"UserPromptSubmit"}\n' | nc -U "$S"   # -> blue
-printf '{"session_id":"demo","event":"Notification"}\n'    | nc -U "$S"   # -> yellow, blinking ?
-printf '{"session_id":"demo","event":"Stop"}\n'            | nc -U "$S"   # -> green
+printf '{"session_id":"demo","event":"UserPromptSubmit"}\n' | nc -U "$S"   # -> teal + spinner
+printf '{"session_id":"demo","event":"Notification"}\n'    | nc -U "$S"   # -> coral, blinking ?
+printf '{"session_id":"demo","event":"Stop"}\n'            | nc -U "$S"   # -> amber
 printf '{"session_id":"demo","event":"SessionEnd"}\n'      | nc -U "$S"   # -> blank
 ```
 
@@ -153,8 +153,8 @@ The hooks are `async` with a short timeout and swallow every error, so a stopped
 daemon never slows down or breaks Claude.
 
 Now start a Claude Code session in Ghostty and watch `snapshot.json`: a fresh
-session lights a key (dim), it goes blue while working, yellow with a `?` when it
-needs you, green when done, and blank when you exit.
+session lights a key (cream), it goes teal while working, coral with a `?` when it
+needs you, amber when done, and blank when you exit.
 
 ## 6. Session ↔ surface correlation & the one-time macOS grant
 
