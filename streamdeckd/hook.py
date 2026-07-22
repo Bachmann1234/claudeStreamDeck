@@ -136,6 +136,31 @@ def resolve_uuid(
 # -- message assembly ---------------------------------------------------------
 
 
+def _git_branch(cwd: str | None, *, timeout: float = 1.0) -> str | None:
+    """The current git branch for ``cwd`` (drives the key label), or ``None``.
+
+    Read-only and best-effort: returns ``None`` outside a repo, on a detached
+    HEAD (``rev-parse`` prints ``"HEAD"``), or if git isn't there. Runs once on
+    ``SessionStart``, so the ~10 ms git call never touches the hot event path."""
+    if not cwd:
+        return None
+    try:
+        proc = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    branch = proc.stdout.strip()
+    if not branch or branch == "HEAD":  # empty or detached
+        return None
+    return branch
+
+
 def _current_tty() -> str | None:
     """Best-effort controlling-tty path (diagnostics + future tty-capable Ghostty)."""
     try:
@@ -179,16 +204,22 @@ def build_line(event: dict, *, target: str = "Ghostty", resolve=True) -> str | N
     cwd = event.get("cwd")
     label = _label_from(event)
     uuid: str | None = None
+    branch: str | None = None
 
     if resolve and hook_event == "SessionStart":
         uuid = resolve_uuid(cwd, target=target)
-        _log(f"SessionStart {session_id[:8]} cwd={cwd!r} -> uuid={uuid!r}")
+        branch = _git_branch(cwd)
+        _log(
+            f"SessionStart {session_id[:8]} cwd={cwd!r} "
+            f"-> uuid={uuid!r} branch={branch!r}"
+        )
 
     payload = {
         "session_id": session_id,
         "event": hook_event,
         "state": _state_value(hook_event),
         "label": label,
+        "branch": branch,
         "tty": _current_tty(),
         "uuid": uuid,
         "cwd": cwd,

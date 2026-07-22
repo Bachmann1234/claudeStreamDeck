@@ -24,7 +24,7 @@ from typing import Callable
 
 from PIL import ImageDraw
 
-from .renderer import _draw_centered, _readable_text_color
+from .renderer import _readable_text_color, draw_label
 from .state import KeyAppearance, KeyState, appearance_for
 
 log = logging.getLogger("streamdeckd.hw")
@@ -134,12 +134,7 @@ class StreamDeckRenderer:
                 [2, 2, size - 3, size - 3], outline=(255, 255, 255), width=3
             )
         if appearance.label:
-            shown = (
-                appearance.label
-                if len(appearance.label) <= 9
-                else appearance.label[:8] + "…"
-            )
-            _draw_centered(draw, shown, size, _readable_text_color(appearance.color))
+            draw_label(draw, size, appearance.label, _readable_text_color(appearance.color))
         return PILHelper.to_native_format(self.deck, img)
 
 

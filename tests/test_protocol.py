@@ -14,6 +14,7 @@ def test_parse_full_message():
             "event": "SessionStart",
             "state": "starting",
             "label": "repo-x",
+            "branch": "feat/1234-auth",
             "tty": "/dev/ttys004",
             "uuid": "U-1",
             "cwd": "/w/repo-x",
@@ -24,6 +25,12 @@ def test_parse_full_message():
     assert msg.event == "SessionStart"
     assert msg.uuid == "U-1"
     assert msg.cwd == "/w/repo-x"
+    assert msg.branch == "feat/1234-auth"
+
+
+def test_branch_roundtrips_through_to_json():
+    msg = Message(session_id="abc", branch="main")
+    assert parse_message(msg.to_json()).branch == "main"
 
 
 def test_parse_minimal_message():

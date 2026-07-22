@@ -9,6 +9,7 @@ inspectable form (a JSON snapshot plus one PNG per key).
 
 from __future__ import annotations
 
+import functools
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,7 +18,7 @@ from typing import Protocol, runtime_checkable
 from .state import KeyAppearance, KeyState, appearance_for
 
 try:  # Pillow is a hard dep for PNG output but we degrade cleanly without it.
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageFont
 
     _PIL_OK = True
 except ImportError:  # pragma: no cover - exercised only on a broken install
@@ -151,12 +152,8 @@ class VirtualDeck:
                 outline=(255, 255, 255),
                 width=3,
             )
-        label = appearance.label
-        if label:
-            text_color = _readable_text_color(appearance.color)
-            # Keep it short; a 96px key fits ~8 chars of the default font.
-            shown = label if len(label) <= 9 else label[:8] + "…"
-            _draw_centered(draw, shown, size, text_color)
+        if appearance.label:
+            draw_label(draw, size, appearance.label, _readable_text_color(appearance.color))
         return img
 
 
@@ -170,11 +167,46 @@ def _readable_text_color(bg: tuple[int, int, int]) -> tuple[int, int, int]:
     return (0, 0, 0) if luminance > 140 else (255, 255, 255)
 
 
-def _draw_centered(draw, text: str, size: int, color) -> None:
-    """Center ``text`` in a ``size``×``size`` key using the default bitmap font."""
-    try:
-        bbox = draw.textbbox((0, 0), text)
-        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    except Exception:  # pragma: no cover - very old Pillow
-        tw, th = len(text) * 6, 11
-    draw.text(((size - tw) / 2, (size - th) / 2), text, fill=color)
+# TrueType faces to try, best first; falls back to Pillow's bitmap font if none
+# are present (e.g. a bare Linux CI box). macOS ships the first two.
+_FONT_CANDIDATES = (
+    "/System/Library/Fonts/HelveticaNeue.ttc",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/Library/Fonts/Arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+)
+
+
+@functools.lru_cache(maxsize=64)
+def _label_font(size: int):
+    """A TrueType font at ``size`` px, or the bitmap default (ignores size)."""
+    for path in _FONT_CANDIDATES:
+        try:
+            return ImageFont.truetype(path, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()  # pragma: no cover - only on font-less hosts
+
+
+def draw_label(draw, size: int, text: str, color, *, margin: int = 6) -> None:
+    """Draw ``text`` as a single centered line in a ``size``×``size`` key.
+
+    No wrapping and no ellipsis by design — labels arrive pre-clipped to a few
+    chars (:func:`streamdeckd.state.format_branch_label`). Picks the largest
+    font, from ~28 % of the key height down, whose one line fits within the
+    horizontal margins, so short labels render big and 7-char ones still fit."""
+    if not text:
+        return
+    avail = size - 2 * margin
+    hi = max(10, int(size * 0.28))
+    lo = max(8, int(size * 0.14))
+    font = _label_font(lo)
+    for pt in range(hi, lo - 1, -1):
+        f = _label_font(pt)
+        if draw.textlength(text, font=f) <= avail:
+            font = f
+            break
+    bbox = draw.textbbox((0, 0), text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.text(((size - tw) / 2, (size - th) / 2 - bbox[1]), text, font=font, fill=color)

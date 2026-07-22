@@ -35,6 +35,7 @@ class Message:
     event: str | None = None
     state: str | None = None
     label: str | None = None
+    branch: str | None = None
     tty: str | None = None
     uuid: str | None = None
     cwd: str | None = None
@@ -45,6 +46,7 @@ class Message:
             "event": self.event,
             "state": self.state,
             "label": self.label,
+            "branch": self.branch,
             "tty": self.tty,
             "uuid": self.uuid,
             "cwd": self.cwd,
@@ -87,6 +89,7 @@ def parse_message(line: str) -> Message:
         event=_clean(raw.get("event")),
         state=_clean(raw.get("state")),
         label=_clean(raw.get("label")),
+        branch=_clean(raw.get("branch")),
         tty=_clean(raw.get("tty")),
         uuid=_clean(raw.get("uuid")),
         cwd=_clean(raw.get("cwd")),

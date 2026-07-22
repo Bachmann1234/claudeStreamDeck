@@ -115,6 +115,27 @@ def appearance_for(state: KeyState, label: str = "") -> KeyAppearance:
     return KeyAppearance(state=base.state, color=base.color, label=label, pulse=base.pulse)
 
 
+# The rendered key label is the git branch, kept deliberately tiny: a single
+# line, no wrapping, no ellipsis — just the distinguishing tail of the branch
+# hard-capped at LABEL_MAX_CHARS. (Calibrated on the physical deck: 7 chars at a
+# comfortable size reads at a glance without crowding the key. See
+# docs/next-steps.md "labels".)
+LABEL_MAX_CHARS = 7
+
+
+def format_branch_label(branch: str | None, *, limit: int = LABEL_MAX_CHARS) -> str:
+    """The branch as it should appear on a key: its last ``/``-segment (dropping
+    a ``feat/``, ``fix/``, ``user/`` … prefix so the *distinguishing* part
+    shows), hard-truncated to ``limit`` chars. No ellipsis by design — a clipped
+    label is fine; a cluttered one isn't. ``"HEAD"`` (detached) yields ``""``."""
+    if not branch:
+        return ""
+    tail = branch.rsplit("/", 1)[-1].strip()
+    if not tail or tail == "HEAD":
+        return ""
+    return tail[:limit]
+
+
 # How much a session "deserves" a key when the deck is full. A session needing
 # you (ATTENTION) outranks one merely working, which outranks a finished (DONE)
 # one — so an urgent session can evict a finished one for its key. Drives
@@ -141,6 +162,7 @@ class Slot:
     key_index: int | None
     state: KeyState = KeyState.STARTING
     label: str = ""
+    branch: str | None = None
     uuid: str | None = None
     tty: str | None = None
     cwd: str | None = None
@@ -157,6 +179,7 @@ class Slot:
             "key_index": self.key_index,
             "state": self.state.value,
             "label": self.label,
+            "branch": self.branch,
             "uuid": self.uuid,
             "tty": self.tty,
             "cwd": self.cwd,
@@ -316,6 +339,7 @@ class SessionModel:
                 key_index=None,
                 state=state,
                 label=msg.label or _default_label(msg),
+                branch=msg.branch,
                 uuid=msg.uuid,
                 tty=msg.tty,
                 cwd=msg.cwd,
@@ -336,6 +360,8 @@ class SessionModel:
             existing.label = msg.label
         elif not existing.label:
             existing.label = _default_label(msg)
+        if msg.branch:
+            existing.branch = msg.branch
         if msg.uuid:
             existing.uuid = msg.uuid
         if msg.tty:
@@ -366,8 +392,18 @@ class SessionModel:
         keys = [appearance_for(KeyState.EMPTY) for _ in range(self.key_count)]
         for slot in self._slots.values():
             if slot.key_index is not None and 0 <= slot.key_index < self.key_count:
-                keys[slot.key_index] = appearance_for(slot.state, slot.label)
+                keys[slot.key_index] = appearance_for(slot.state, _display_label(slot))
         return keys
+
+
+def _display_label(slot: Slot) -> str:
+    """The 7-char string a key actually shows: the branch if we have one, else
+    the repo/hook label as a fallback — both run through the same clip so no key
+    ever shows more than :data:`LABEL_MAX_CHARS`."""
+    branch_label = format_branch_label(slot.branch)
+    if branch_label:
+        return branch_label
+    return format_branch_label(slot.label)  # fallback: clip repo basename the same way
 
 
 def _default_label(msg) -> str:

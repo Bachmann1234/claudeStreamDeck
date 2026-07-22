@@ -125,6 +125,67 @@ def test_build_line_no_session_id_returns_none():
     assert hook.build_line({"hook_event_name": "Stop"}, resolve=False) is None
 
 
+# -- branch resolution -----------------------------------------------------
+
+
+class _FakeProc:
+    def __init__(self, stdout="", returncode=0):
+        self.stdout = stdout
+        self.returncode = returncode
+
+
+def test_git_branch_returns_current_branch(monkeypatch):
+    monkeypatch.setattr(hook.subprocess, "run",
+                        lambda *a, **k: _FakeProc("feat/1234-auth\n"))
+    assert hook._git_branch("/w/repo") == "feat/1234-auth"
+
+
+def test_git_branch_none_on_detached_head(monkeypatch):
+    monkeypatch.setattr(hook.subprocess, "run", lambda *a, **k: _FakeProc("HEAD\n"))
+    assert hook._git_branch("/w/repo") is None
+
+
+def test_git_branch_none_outside_repo(monkeypatch):
+    monkeypatch.setattr(hook.subprocess, "run",
+                        lambda *a, **k: _FakeProc("", returncode=128))
+    assert hook._git_branch("/w/notrepo") is None
+
+
+def test_git_branch_none_without_cwd():
+    assert hook._git_branch(None) is None  # no subprocess call at all
+
+
+def test_git_branch_swallows_git_missing(monkeypatch):
+    def boom(*a, **k):
+        raise FileNotFoundError("git not found")
+    monkeypatch.setattr(hook.subprocess, "run", boom)
+    assert hook._git_branch("/w/repo") is None
+
+
+def test_build_line_includes_branch_on_sessionstart(monkeypatch):
+    monkeypatch.setattr(hook, "resolve_uuid", lambda *a, **k: "U-1")
+    monkeypatch.setattr(hook, "_git_branch", lambda *a, **k: "feat/1234-auth")
+    line = hook.build_line(
+        {"session_id": "abc", "hook_event_name": "SessionStart", "cwd": "/w/repo"},
+        resolve=True,
+    )
+    msg = parse_message(line)
+    assert msg.branch == "feat/1234-auth"
+    assert msg.uuid == "U-1"
+
+
+def test_build_line_omits_branch_off_sessionstart(monkeypatch):
+    # branch is resolved only on SessionStart; other events carry no branch.
+    def fail(*a, **k):  # pragma: no cover - must not be called
+        raise AssertionError("_git_branch called off SessionStart")
+    monkeypatch.setattr(hook, "_git_branch", fail)
+    line = hook.build_line(
+        {"session_id": "abc", "hook_event_name": "Stop", "cwd": "/w/repo"},
+        resolve=True,
+    )
+    assert parse_message(line).branch is None
+
+
 def test_build_line_unknown_event_has_no_state():
     line = hook.build_line(
         {"session_id": "abc", "hook_event_name": "PreCompact"}, resolve=False

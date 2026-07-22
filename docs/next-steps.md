@@ -107,9 +107,13 @@ Everything above uses the VirtualDeck; this lit up the real board.
       physical press reached the daemon).
 
 ### Remaining hardware polish (optional, deck-in-hand)
-- [ ] **Labels on keys:** the model carries a per-session `label` but nothing
-      sets it yet — keys currently show only color. Decide what to paint (repo
-      basename? branch? a digit?) and have the hook/model populate it.
+- [x] **Labels on keys — DONE 2026-07-21.** Keys show the **git branch**, single
+      line, no wrap, no ellipsis, hard-capped at 7 chars (`format_branch_label`:
+      last `/`-segment, clipped — `feat/1234-auth` → `1234-au`). The
+      `SessionStart` hook resolves it via `git rev-parse --abbrev-ref HEAD` and
+      sends a `branch` field; the model prefers it over the repo basename. Size
+      calibrated on the physical deck (`draw_label` auto-fits one line). Falls
+      back to the repo basename (same clip) outside a repo / on detached HEAD.
 - [ ] **Animation:** ATTENTION renders as a *static* white ring (no tick loop).
       If you want it to actually pulse, see the animation decision below.
 - [ ] **Auto-detect at startup:** `cli.py` uses `--deck` opt-in. Could instead

@@ -5,10 +5,12 @@ import pytest
 from streamdeckd.protocol import Message
 from streamdeckd.state import (
     APPEARANCE,
+    LABEL_MAX_CHARS,
     RELEASE,
     KeyState,
     SessionModel,
     appearance_for,
+    format_branch_label,
     resolve_state,
 )
 
@@ -247,3 +249,51 @@ def test_appearance_for_stamps_label():
 def test_key_count_must_be_positive():
     with pytest.raises(ValueError):
         SessionModel(key_count=0)
+
+
+# -- branch labels ---------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "branch,expected",
+    [
+        ("main", "main"),
+        ("develop", "develop"),
+        ("m2-headless-m3-hooks", "m2-head"),      # clipped to 7, no ellipsis
+        ("feat/1234-auth-refactor", "1234-au"),   # last segment, then clip
+        ("matt/spike", "spike"),                  # user prefix dropped
+        ("renovate/deps", "deps"),
+        ("HEAD", ""),                             # detached -> nothing
+        ("", ""),
+        (None, ""),
+    ],
+)
+def test_format_branch_label(branch, expected):
+    assert format_branch_label(branch) == expected
+
+
+def test_format_branch_label_never_exceeds_max():
+    assert len(format_branch_label("a-very-long-branch-name-indeed")) == LABEL_MAX_CHARS
+
+
+def test_snapshot_label_prefers_branch_over_repo():
+    m = SessionModel()
+    m.apply(_msg("a", "SessionStart", label="claudeStreamDeck",
+                 branch="feat/1234-auth", cwd="/w/claudeStreamDeck"))
+    # The key shows the branch tail (clipped), not the repo basename.
+    assert m.snapshot_keys()[0].label == "1234-au"
+
+
+def test_snapshot_label_falls_back_to_repo_when_no_branch():
+    m = SessionModel()
+    m.apply(_msg("a", "SessionStart", label="api-server"))
+    assert m.snapshot_keys()[0].label == "api-ser"  # repo clipped the same way
+
+
+def test_branch_updates_on_later_message():
+    m = SessionModel()
+    m.apply(_msg("a", "SessionStart", branch="main"))
+    assert m.snapshot_keys()[0].label == "main"
+    m.apply(_msg("a", "UserPromptSubmit", branch="feature-x"))
+    assert m.get("a").branch == "feature-x"
+    assert m.snapshot_keys()[0].label == "feature"
