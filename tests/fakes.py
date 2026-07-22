@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from gsm.applescript import DeadSurface
+from gsm.applescript import DeadSurface, TtyUnsupported
 
 
 class FakeGhostty:
@@ -23,13 +23,41 @@ class FakeGhostty:
         self.windows_open = False   # does has_open_window() report a window?
         self.tab_error = None       # set to an Exception to simulate no Accessibility
         self.running = True         # is_running() result (the reaper gates on it)
+        self.front_uuid: str | None = None  # focused_terminal_id() result
 
     def is_running(self) -> bool:
         return self.running
 
+    def frontmost(self) -> bool:
+        return False
+
+    def focused_terminal_id(self) -> str | None:
+        return self.front_uuid
+
+    def terminal_exists(self, uuid: str) -> bool:
+        return uuid in self.live
+
     def list_terminals(self):
         """Live surfaces, as objects exposing ``.uuid`` (what the reaper reads)."""
-        return [SimpleNamespace(uuid=u) for u in sorted(self.live)]
+        return [
+            SimpleNamespace(uuid=u, title=f"title-{u}", working_directory=f"/wd/{u}")
+            for u in sorted(self.live)
+        ]
+
+    def resolve_by_working_directory(self, path: str) -> str | None:
+        for t in self.list_terminals():
+            if t.working_directory == path:
+                return t.uuid
+        return None
+
+    def resolve_by_tty(self, tty: str) -> str | None:
+        raise TtyUnsupported("no tty on stock 1.3.1")
+
+    def resolve_by_title_contains(self, needle: str) -> str | None:
+        for t in self.list_terminals():
+            if needle in t.title:
+                return t.uuid
+        return None
 
     def focus(self, uuid: str) -> None:
         self.focused.append(uuid)

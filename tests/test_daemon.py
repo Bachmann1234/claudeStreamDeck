@@ -446,3 +446,31 @@ def test_watchdog_disabled_with_zero_timeout(tmp_path):
     d._activity["a"] -= 9999
     assert d._downgrade_stale_working() == 0
     assert d.model.get("a").state is KeyState.WORKING
+
+
+# -- maintenance bookkeeping ------------------------------------------------
+
+
+def test_activity_pruned_on_session_end(tmp_path):
+    d, _, _, _ = _daemon(tmp_path)
+    d.handle_line(_line(session_id="a", event="SessionStart"))
+    assert "a" in d._activity
+    d.handle_line(_line(session_id="a", event="SessionEnd"))
+    assert "a" not in d._activity
+
+
+def test_supplied_model_gets_launcher_key_reserved(tmp_path):
+    from streamdeckd.state import SessionModel
+
+    manager = Manager(
+        ghostty=FakeGhostty(), registry=Registry(path=tmp_path / "reg.json")
+    )
+    model = SessionModel(15)  # constructed without knowledge of the launcher
+    Daemon(
+        manager=manager,
+        renderer=RecordingRenderer(key_count=15),
+        model=model,
+        socket_path=tmp_path / "d.sock",
+        launcher_key=14,
+    )
+    assert 14 in model.reserved

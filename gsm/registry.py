@@ -12,7 +12,7 @@ import fcntl
 import json
 import os
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -57,9 +57,10 @@ class Registry:
     """
 
     def __init__(self, path: Path | None = None):
-        home = default_home()
-        self.path = path or (home / "registry.json")
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path = path or (default_home() / "registry.json")
+        # 0o700: the registry holds session cwds/commands — no other user's
+        # business on a shared machine. (Only applies when we create the dir.)
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
 
     # -- lock + io ---------------------------------------------------------
 
@@ -105,8 +106,9 @@ class Registry:
             sessions = self._read()
             existing = sessions.get(session.tag)
             if existing is not None:
-                # Preserve creation time on update.
-                session.created_at = existing.created_at
+                # Preserve creation time on update — on a copy, so the caller's
+                # object is never mutated behind its back.
+                session = replace(session, created_at=existing.created_at)
             sessions[session.tag] = session
             self._write(sessions)
 

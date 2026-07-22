@@ -79,6 +79,9 @@ class Daemon:
         self.launch_cwd = launch_cwd
         reserved = frozenset() if self.launcher_key is None else frozenset({self.launcher_key})
         self.model = model or SessionModel(self.renderer.key_count, reserved=reserved)
+        # A caller-supplied model must reserve the launcher key too, or the
+        # model could allocate a session onto the key the daemon paints itself.
+        self.model.reserved = frozenset(self.model.reserved) | reserved
         self._launcher_appearance = appearance_for(KeyState.LAUNCHER)
         if self.model.key_count != self.renderer.key_count:
             raise ValueError(
@@ -169,6 +172,7 @@ class Daemon:
             return
         if result.released:
             self.manager.release(slot.session_id)
+            self._activity.pop(slot.session_id, None)
         elif slot.uuid:
             self.manager.bind(
                 slot.session_id,
@@ -256,6 +260,7 @@ class Daemon:
             for sid in dead:
                 self.model.remove(sid)
                 self.manager.release(sid)
+                self._activity.pop(sid, None)
             if dead:
                 self._repaint()
         if dead:
@@ -334,6 +339,9 @@ class Daemon:
         if key_index == self.launcher_key:
             self._launch()
             return None
+        # Snapshot the slot's fields under the lock, then do the AppleScript
+        # round-trip *off* it — focus takes an osascript subprocess (~100 ms),
+        # and holding the lock that long would stall hook ingest and animation.
         with self._lock:
             slot = self.model.session_for_key(key_index)
             if slot is None:
@@ -347,24 +355,27 @@ class Daemon:
                     slot.session_id[:8],
                 )
                 return slot
-            self.manager.bind(
-                slot.session_id, slot.uuid, tty=slot.tty, working_directory=slot.cwd
-            )
-            try:
-                self.manager.focus(slot.session_id)
-            except DeadSurface:
-                log.info("surface for session %s died; releasing key %s",
-                         slot.session_id[:8], key_index)
-                self.model.remove(slot.session_id)
-                self.manager.release(slot.session_id)
+            session_id, uuid, tty, cwd = slot.session_id, slot.uuid, slot.tty, slot.cwd
+        self.manager.bind(session_id, uuid, tty=tty, working_directory=cwd)
+        try:
+            self.manager.focus(session_id)
+        except DeadSurface:
+            log.info("surface for session %s died; releasing key %s",
+                     session_id[:8], key_index)
+            with self._lock:
+                self.model.remove(session_id)
+                self.manager.release(session_id)
+                self._activity.pop(session_id, None)
                 self._repaint()
-                return None
-            except UnknownTag:
-                # Registry lost it between bind and focus — treat as dead.
-                self.model.remove(slot.session_id)
+            return None
+        except UnknownTag:
+            # Registry lost it between bind and focus — treat as dead.
+            with self._lock:
+                self.model.remove(session_id)
+                self._activity.pop(session_id, None)
                 self._repaint()
-                return None
-            return slot
+            return None
+        return slot
 
     def _launch(self) -> None:
         """Open a new session for the user to work in.
@@ -408,7 +419,13 @@ class Daemon:
                 for raw in self.rfile:  # newline-delimited
                     daemon.handle_line(raw.decode("utf-8", "replace"))
 
-        server = _ThreadingUnixServer(str(self.socket_path), _Handler)
+        # Bind under a restrictive umask so the socket is never world-writable,
+        # even for the instant before the explicit chmod below.
+        old_umask = os.umask(0o077)
+        try:
+            server = _ThreadingUnixServer(str(self.socket_path), _Handler)
+        finally:
+            os.umask(old_umask)
         os.chmod(self.socket_path, 0o600)  # only this user may talk to the deck
         self._server = server
 
@@ -443,7 +460,9 @@ class Daemon:
     # -- socket housekeeping ----------------------------------------------
 
     def _prepare_socket_path(self) -> None:
-        self.socket_path.parent.mkdir(parents=True, exist_ok=True)
+        # 0o700 to match the registry: this dir holds the socket, logs, and
+        # session metadata — private to the user. (Only applies on creation.)
+        self.socket_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         if self.socket_path.exists():
             # A leftover socket from a crash, or another live daemon?
             if self._socket_is_live():

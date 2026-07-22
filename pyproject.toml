@@ -10,7 +10,7 @@ requires-python = ">=3.10"
 dependencies = ["pillow>=9"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "coverage>=7"]
 # The USB HID driver for a physical board. Optional: the daemon imports it
 # lazily and only under `--deck`, so headless installs don't need it.
 # Also requires the `hidapi` system lib (macOS: `brew install hidapi`).

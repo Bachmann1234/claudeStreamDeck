@@ -108,8 +108,8 @@ tile stamped with its key index (so key `3` maps to `{"press": 3}`).
 {
   "key_count": 15,
   "keys": [
-    {"index": 0, "state": "working", "color": [0, 90, 200], "label": "repo-x", "pulse": false},
-    {"index": 1, "state": "attention", "color": [235, 185, 0], "label": "api", "pulse": true},
+    {"index": 0, "state": "working", "color": [18, 140, 140], "label": "repo-x", "pulse": false},
+    {"index": 1, "state": "attention", "color": [255, 111, 89], "label": "api", "pulse": true},
     {"index": 2, "state": "empty", "color": [0, 0, 0], "label": "", "pulse": false}
   ]
 }
@@ -239,8 +239,8 @@ launchctl unload ~/Library/LaunchAgents/com.claudestreamdeck.streamdeckd.plist
   the hook? Check `STREAMDECKD_SOCKET`/`GSM_HOME` match on both sides. Run
   `streamdeckd -v` and watch the log as you send a line.
 - **Keys light up but pressing does nothing.** The session had no resolved UUID.
-  Check `~/.claudeStreamDeck/hook.log` — it records each `SessionStart`
-  resolution (`… -> uuid='…'` on success, `-> uuid=None` on a miss) — and
+  Check `~/.claudeStreamDeck/hook.log` (rotated to `hook.log.1` past ~256 KB) —
+  it records each `SessionStart` resolution (`… -> uuid='…'` on success, `-> uuid=None` on a miss) — and
   `~/.claudeStreamDeck/registry.json` for the stored mapping. A `None` usually
   means the Automation grant for the hook is missing, or the session was started
   in a non-focused window with another same-cwd session open (see

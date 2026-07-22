@@ -107,10 +107,16 @@ class Ghostty:
     # -- app state ---------------------------------------------------------
 
     def is_running(self) -> bool:
-        """True if a Ghostty process exists, checked *without* launching it."""
+        """True if the target's process exists, checked *without* launching it.
+
+        The process name is derived from the target (an app name, or a ``.app``
+        path whose basename is the app name), so a ``--target`` pointing at a
+        renamed/dev build is checked correctly rather than always looking for
+        a process literally named "Ghostty".
+        """
         script = (
             'tell application "System Events" to '
-            '(name of processes) contains "Ghostty"'
+            f'(name of processes) contains "{_as_str_inner(_process_name(self._target))}"'
         )
         try:
             return self._run(script).strip().lower() == "true"
@@ -289,9 +295,26 @@ class Ghostty:
 # -- helpers ---------------------------------------------------------------
 
 
+def _process_name(target: str) -> str:
+    """System Events process name for a target: the app name itself, or the
+    ``.app`` bundle's basename when the target is a path."""
+    name = target.rstrip("/").rsplit("/", 1)[-1]
+    return name[:-4] if name.endswith(".app") else name
+
+
 def _as_str_inner(value: str) -> str:
-    """Escape a Python string for use *inside* AppleScript double quotes."""
-    return value.replace("\\", "\\\\").replace('"', '\\"')
+    """Escape a Python string for use *inside* AppleScript double quotes.
+
+    Newlines/CRs are escaped too (AppleScript understands ``\\n``/``\\r``): a
+    raw newline inside a quoted literal is a syntax error, and filenames may
+    legally contain them.
+    """
+    return (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+    )
 
 
 def _as_str(value: str) -> str:

@@ -39,6 +39,12 @@ TARGET_ENV = "STREAMDECKD_GHOSTTY"  # override the Ghostty app name/path
 _RESOLVE_EVENTS = frozenset({"SessionStart", "UserPromptSubmit"})
 
 
+# Cap hook.log so a long-lived install can't grow it without bound: past the
+# cap the file rotates to hook.log.1 (one generation kept — plenty to debug a
+# recent correlation miss).
+_LOG_MAX_BYTES = 256 * 1024
+
+
 def _log(message: str) -> None:
     """Append one diagnostic line next to the socket. Never raises."""
     try:
@@ -46,7 +52,13 @@ def _log(message: str) -> None:
         base = os.path.expanduser(home) if home else os.path.join(
             os.path.expanduser("~"), ".claudeStreamDeck"
         )
-        with open(os.path.join(base, "hook.log"), "a") as f:
+        path = os.path.join(base, "hook.log")
+        try:
+            if os.path.getsize(path) > _LOG_MAX_BYTES:
+                os.replace(path, path + ".1")
+        except OSError:
+            pass  # no log yet, or a race with another hook — either is fine
+        with open(path, "a") as f:
             f.write(message + "\n")
     except OSError:
         pass
@@ -83,7 +95,14 @@ def _run_osascript(script: str, *, timeout: float = 2.0) -> str:
 
 
 def _as_applescript_str(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
+    # Mirrors gsm.applescript._as_str_inner (no gsm import here by design):
+    # newlines are escaped too — a raw one inside a literal is a syntax error.
+    return (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+    )
 
 
 def _focused_id(run_osascript, target: str) -> str | None:

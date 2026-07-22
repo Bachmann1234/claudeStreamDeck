@@ -292,3 +292,23 @@ def test_main_swallows_everything(monkeypatch):
 
     monkeypatch.setattr("sys.stdin", io.StringIO("{not json"))
     assert hook.main() == 0
+
+
+# -- hook.log rotation ------------------------------------------------------
+
+
+def test_log_rotates_past_cap(tmp_path, monkeypatch):
+    monkeypatch.setenv("GSM_HOME", str(tmp_path))
+    log_path = tmp_path / "hook.log"
+    log_path.write_text("x" * (hook._LOG_MAX_BYTES + 1))
+    hook._log("fresh line")
+    assert (tmp_path / "hook.log.1").exists()
+    assert log_path.read_text() == "fresh line\n"
+
+
+def test_log_appends_below_cap(tmp_path, monkeypatch):
+    monkeypatch.setenv("GSM_HOME", str(tmp_path))
+    hook._log("one")
+    hook._log("two")
+    assert (tmp_path / "hook.log").read_text() == "one\ntwo\n"
+    assert not (tmp_path / "hook.log.1").exists()
