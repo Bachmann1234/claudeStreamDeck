@@ -30,7 +30,7 @@ from gsm.manager import Manager, UnknownTag
 from gsm.registry import default_home
 
 from .animation import animate_frame, has_animation
-from .protocol import ProtocolError, parse_message
+from .protocol import Message, ProtocolError, parse_message
 from .renderer import Renderer, VirtualDeck
 from .state import ApplyResult, KeyState, SessionModel, Slot, appearance_for
 
@@ -290,6 +290,47 @@ class Daemon:
                      len(changed), self._working_timeout)
         return len(changed)
 
+    def _readopt_live_sessions(self) -> int:
+        """Repopulate the model from the persisted registry on startup.
+
+        The model is in-memory, so a daemon restart forgets every session until
+        it fires its next hook — the deck goes dark on live-but-idle sessions.
+        The gsm registry *does* persist ``tag -> uuid``, so on startup we replay
+        the entries whose surfaces are still alive back into the model (state
+        DONE — we can't know what they were doing, and DONE yields its key first
+        under overflow). Dead entries are pruned from the registry in passing.
+
+        Conservative like the reaper: if Ghostty can't be reached we skip
+        entirely rather than blank or resurrect on a guess. Caller holds the lock.
+        Returns how many sessions were re-adopted."""
+        ghostty = self.manager.ghostty
+        try:
+            if not ghostty.is_running():
+                return 0
+            live = {t.uuid for t in ghostty.list_terminals()}
+        except Exception:
+            return 0  # can't confirm liveness -> don't touch the registry
+        readopted = 0
+        for tag, session in self.manager.registry.all().items():
+            if session.uuid and session.uuid in live:
+                msg = Message(
+                    session_id=tag,
+                    state=KeyState.DONE.value,
+                    label=_readopt_label(session),
+                    uuid=session.uuid,
+                    tty=session.tty,
+                    cwd=session.working_directory,
+                )
+                self.model.apply(msg)
+                self._activity[tag] = time.monotonic()
+                readopted += 1
+            else:
+                self.manager.release(tag)  # surface gone -> drop the stale binding
+        if readopted:
+            log.info("re-adopted %d live session(s) from the registry after restart",
+                     readopted)
+        return readopted
+
     def _reconcile_loop(self) -> None:
         """Background maintenance tick: the working-state watchdog, then the
         dead-surface reaper. Only queries Ghostty when a key is bound to a UUID —
@@ -434,7 +475,8 @@ class Daemon:
                 signal.signal(sig, lambda *_: self.shutdown())
 
         with self._lock:
-            self._repaint()  # blank frame so a reader sees a coherent deck
+            self._readopt_live_sessions()  # repaint sessions that outlived a restart
+            self._repaint()  # coherent deck for a reader from the first frame
         self._start_animation()
         self._start_reaper()
         log.info("streamdeckd listening on %s (%d keys)",
@@ -493,6 +535,18 @@ class Daemon:
                 self.socket_path.unlink()
             except FileNotFoundError:
                 pass
+
+
+def _readopt_label(session) -> str:
+    """A key label for a session re-adopted from the registry. Branch isn't
+    persisted, so fall back to the cwd basename (the model clips it to fit);
+    empty if there's nothing to show."""
+    cwd = session.working_directory
+    if cwd:
+        base = cwd.rstrip("/").rsplit("/", 1)[-1]
+        if base:
+            return base
+    return ""
 
 
 class _ThreadingUnixServer(socketserver.ThreadingUnixStreamServer):

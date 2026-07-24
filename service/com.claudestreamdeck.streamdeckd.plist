@@ -31,10 +31,15 @@
     <key>ThrottleInterval</key>
     <integer>10</integer>
 
+    <!-- launchd captures only startup/crash output here (a *different* file
+         from streamdeckd.log): the daemon rotates streamdeckd.log itself, and
+         launchd would keep writing to the renamed inode after a rotation,
+         undermining the cap. This boot log stays tiny — nothing is logged to
+         raw stderr once the daemon's logging is configured. -->
     <key>StandardOutPath</key>
-    <string>/ABSOLUTE/PATH/HOME/.claudeStreamDeck/streamdeckd.log</string>
+    <string>/ABSOLUTE/PATH/HOME/.claudeStreamDeck/streamdeckd.boot.log</string>
     <key>StandardErrorPath</key>
-    <string>/ABSOLUTE/PATH/HOME/.claudeStreamDeck/streamdeckd.log</string>
+    <string>/ABSOLUTE/PATH/HOME/.claudeStreamDeck/streamdeckd.boot.log</string>
 
     <!-- Uncomment / edit to override the socket path or Ghostty app name.
     <key>EnvironmentVariables</key>

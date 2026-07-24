@@ -35,7 +35,9 @@ SOCKET_ENV = "STREAMDECKD_SOCKET"
 TARGET_ENV = "STREAMDECKD_GHOSTTY"  # override the Ghostty app name/path
 
 # Events on which the hook resolves (or re-resolves) its Ghostty surface UUID.
-# Both fire while this session's surface is frontmost.
+# Both fire while this session's surface is frontmost. SessionStart always
+# resolves; UserPromptSubmit only resolves until the session is bound once (see
+# _resolved_marker) — a heal for the rare start-time miss, not a per-prompt cost.
 _RESOLVE_EVENTS = frozenset({"SessionStart", "UserPromptSubmit"})
 
 
@@ -67,16 +69,39 @@ def _log(message: str) -> None:
 # -- socket path (kept in sync with gsm.registry.default_home, no gsm import) --
 
 
-def default_socket_path() -> str:
+def _base_dir() -> str:
     home = os.environ.get("GSM_HOME")
-    base = os.path.expanduser(home) if home else os.path.join(
+    return os.path.expanduser(home) if home else os.path.join(
         os.path.expanduser("~"), ".claudeStreamDeck"
     )
-    return os.path.join(base, "streamdeckd.sock")
+
+
+def default_socket_path() -> str:
+    return os.path.join(_base_dir(), "streamdeckd.sock")
 
 
 def socket_path() -> str:
     return os.environ.get(SOCKET_ENV) or default_socket_path()
+
+
+def _already_bound(session_id: str) -> bool:
+    """Has the daemon already bound this session to a surface UUID?
+
+    Read straight from the daemon's ``registry.json`` (tag == session_id), no
+    ``gsm`` import and no lock: the registry writes atomically (``os.replace``),
+    so a reader sees a whole old or new file, never a torn one. This lets
+    ``UserPromptSubmit`` skip its ``osascript`` re-resolution once a *good*
+    binding exists, while a session the daemon rejected (a mis-resolved sibling
+    surface it refused to double-bind) stays absent here and keeps re-resolving
+    until it heals. Best-effort: any error -> ``False`` -> we just resolve again.
+    """
+    try:
+        with open(os.path.join(_base_dir(), "registry.json")) as f:
+            sessions = json.load(f).get("sessions", {})
+    except (OSError, ValueError):
+        return False
+    entry = sessions.get(session_id)
+    return bool(entry and entry.get("uuid"))
 
 
 # -- correlation: resolve this session's Ghostty surface UUID -----------------
@@ -254,18 +279,22 @@ def build_line(event: dict, *, target: str = "Ghostty", resolve=True) -> str | N
     uuid: str | None = None
     branch: str | None = None
 
-    # Resolve the surface UUID on SessionStart *and* on UserPromptSubmit. On a
-    # prompt you're focused in that surface, so re-resolving there heals a
-    # binding that couldn't be pinned at start (the daemon only fills it if
-    # empty). The git branch is looked up once, on SessionStart.
+    # Resolve the surface UUID on SessionStart, and on UserPromptSubmit *only
+    # until the daemon has bound this session once*. On a prompt you're focused
+    # in that surface, so re-resolving there heals a binding that couldn't be
+    # pinned at start; but once a good binding exists, re-resolving every prompt
+    # just burns two osascript round-trips synchronously on Claude's hot path
+    # for no gain. The git branch is looked up once, on SessionStart.
     if resolve and hook_event in _RESOLVE_EVENTS:
-        uuid = resolve_uuid(cwd, target=target)
-        if hook_event == "SessionStart":
-            branch = _git_branch(cwd)
-        _log(
-            f"{hook_event} {session_id[:8]} cwd={cwd!r} "
-            f"-> uuid={uuid!r} branch={branch!r}"
-        )
+        needs_resolve = hook_event == "SessionStart" or not _already_bound(session_id)
+        if needs_resolve:
+            uuid = resolve_uuid(cwd, target=target)
+            if hook_event == "SessionStart":
+                branch = _git_branch(cwd)
+            _log(
+                f"{hook_event} {session_id[:8]} cwd={cwd!r} "
+                f"-> uuid={uuid!r} branch={branch!r}"
+            )
 
     state = _state_value(event)
     # For a Notification we don't want the daemon's event->ATTENTION fallback to

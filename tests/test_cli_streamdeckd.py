@@ -96,6 +96,9 @@ def wired(monkeypatch):
     renderer = FakeRenderer()
     monkeypatch.setattr(cli, "Daemon", FakeDaemon)
     monkeypatch.setattr(cli, "_make_renderer", lambda args, log: renderer)
+    # These tests exercise wiring, not logging — stub logging setup so main()
+    # never writes to (or rotates) the developer's real ~/.claudeStreamDeck log.
+    monkeypatch.setattr(cli, "_configure_logging", lambda verbose: None)
     return renderer
 
 
@@ -127,8 +130,55 @@ def test_main_passes_launch_and_timeout_flags(wired):
 
 
 def test_main_renderer_failure_is_exit_1(monkeypatch):
+    monkeypatch.setattr(cli, "_configure_logging", lambda verbose: None)
+
     def boom(args, log):
         raise RuntimeError("could not open")
 
     monkeypatch.setattr(cli, "_make_renderer", boom)
     assert cli.main(["--deck"]) == 1
+
+
+# -- logging: size-capped file + quiet stderr under launchd -----------------
+
+
+def _reset_root_logging():
+    root = logging.getLogger()
+    for h in list(root.handlers):
+        root.removeHandler(h)
+
+
+def test_configure_logging_adds_rotating_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("GSM_HOME", str(tmp_path))
+    _reset_root_logging()
+    try:
+        cli._configure_logging(verbose=False)
+        handlers = logging.getLogger().handlers
+        rotating = [h for h in handlers if isinstance(h, cli.RotatingFileHandler)]
+        stream = [
+            h for h in handlers
+            if isinstance(h, logging.StreamHandler)
+            and not isinstance(h, cli.RotatingFileHandler)
+        ]
+        assert rotating and rotating[0].maxBytes == cli._LOG_MAX_BYTES
+        assert (tmp_path / "streamdeckd.log").exists()
+        # Non-verbose: stderr stays quiet (WARNING+) so launchd's boot log
+        # doesn't grow with routine INFO.
+        assert stream and stream[0].level == logging.WARNING
+    finally:
+        _reset_root_logging()
+
+
+def test_configure_logging_verbose_stream_is_debug(tmp_path, monkeypatch):
+    monkeypatch.setenv("GSM_HOME", str(tmp_path))
+    _reset_root_logging()
+    try:
+        cli._configure_logging(verbose=True)
+        stream = [
+            h for h in logging.getLogger().handlers
+            if isinstance(h, logging.StreamHandler)
+            and not isinstance(h, cli.RotatingFileHandler)
+        ]
+        assert stream and stream[0].level == logging.DEBUG
+    finally:
+        _reset_root_logging()

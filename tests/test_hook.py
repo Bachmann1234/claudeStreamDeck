@@ -222,6 +222,53 @@ def test_build_line_reresolves_uuid_on_userpromptsubmit(monkeypatch):
     assert msg.branch is None  # branch is resolved only on SessionStart
 
 
+def test_userpromptsubmit_skips_resolve_once_bound(tmp_path, monkeypatch):
+    # The per-prompt cost fix: once the daemon has bound this session (its uuid
+    # is in registry.json), UserPromptSubmit must NOT re-run osascript.
+    monkeypatch.setenv("GSM_HOME", str(tmp_path))
+    (tmp_path / "registry.json").write_text(
+        json.dumps({"sessions": {"abc": {"uuid": "U-BOUND"}}})
+    )
+
+    def fail(*a, **k):  # pragma: no cover - must not be called
+        raise AssertionError("resolve_uuid ran despite an existing binding")
+
+    monkeypatch.setattr(hook, "resolve_uuid", fail)
+    line = hook.build_line(
+        {"session_id": "abc", "hook_event_name": "UserPromptSubmit", "cwd": "/w"},
+        resolve=True,
+    )
+    assert parse_message(line).uuid is None  # no uuid sent; daemon keeps its own
+
+
+def test_userpromptsubmit_still_resolves_when_unbound(tmp_path, monkeypatch):
+    # A session the daemon rejected (mis-resolved sibling surface) has no uuid in
+    # the registry, so UserPromptSubmit keeps re-resolving until it heals.
+    monkeypatch.setenv("GSM_HOME", str(tmp_path))  # no registry.json at all
+    monkeypatch.setattr(hook, "resolve_uuid", lambda *a, **k: "U-HEALED")
+    line = hook.build_line(
+        {"session_id": "abc", "hook_event_name": "UserPromptSubmit", "cwd": "/w"},
+        resolve=True,
+    )
+    assert parse_message(line).uuid == "U-HEALED"
+
+
+def test_sessionstart_always_resolves_even_when_bound(tmp_path, monkeypatch):
+    # SessionStart is a fresh session (a reused id would be a new surface), so it
+    # always resolves regardless of a stale registry entry.
+    monkeypatch.setenv("GSM_HOME", str(tmp_path))
+    (tmp_path / "registry.json").write_text(
+        json.dumps({"sessions": {"abc": {"uuid": "U-OLD"}}})
+    )
+    monkeypatch.setattr(hook, "resolve_uuid", lambda *a, **k: "U-FRESH")
+    monkeypatch.setattr(hook, "_git_branch", lambda *a, **k: None)
+    line = hook.build_line(
+        {"session_id": "abc", "hook_event_name": "SessionStart", "cwd": "/w"},
+        resolve=True,
+    )
+    assert parse_message(line).uuid == "U-FRESH"
+
+
 def test_build_line_omits_branch_off_sessionstart(monkeypatch):
     # branch is resolved only on SessionStart; other events carry no branch.
     def fail(*a, **k):  # pragma: no cover - must not be called

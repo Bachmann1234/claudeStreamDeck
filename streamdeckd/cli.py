@@ -13,12 +13,20 @@ from __future__ import annotations
 
 import argparse
 import logging
+from logging.handlers import RotatingFileHandler
 
 from gsm.applescript import Ghostty
 from gsm.manager import Manager
+from gsm.registry import default_home
 
 from .daemon import Daemon, default_socket_path, default_virtualdeck_dir
 from .renderer import VirtualDeck
+
+# Cap the daemon's own log so a long-lived launchd install can't grow it without
+# bound (launchd's StandardOutPath is never rotated — that was the 7 MB-in-two-
+# days footgun). 2 MB × 3 backups keeps a useful window at a trivial disk cost.
+_LOG_MAX_BYTES = 2 * 1024 * 1024
+_LOG_BACKUPS = 3
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -137,12 +145,49 @@ def _make_renderer(args, log):
     )
 
 
+def _configure_logging(verbose: bool) -> None:
+    """Log to stderr *and* a size-capped rotating file.
+
+    launchd captured the daemon's stderr into ``streamdeckd.log`` but never
+    rotated it, so on a long-lived install that file grew unbounded (7 MB in two
+    days). Now the full INFO log goes to a size-capped
+    :class:`RotatingFileHandler`; stderr (which launchd still captures, into a
+    separate boot log) carries only WARNING+ so that file stays tiny while
+    startup/crash output — Python tracebacks write to stderr directly — is still
+    caught."""
+    level = logging.DEBUG if verbose else logging.INFO
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    root = logging.getLogger()
+    root.setLevel(level)
+
+    # Under launchd (no -v) stderr carries only WARNING+, so routine INFO doesn't
+    # flow to the boot log and reintroduce the unbounded-growth bug the rotating
+    # file fixes. Running manually with -v, the user wants the full stream on the
+    # console, so honor that.
+    stream = logging.StreamHandler()
+    stream.setLevel(level if verbose else logging.WARNING)
+    stream.setFormatter(fmt)
+    root.addHandler(stream)
+
+    try:
+        log_path = default_home() / "streamdeckd.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        rotating = RotatingFileHandler(
+            log_path, maxBytes=_LOG_MAX_BYTES, backupCount=_LOG_BACKUPS
+        )
+        rotating.setFormatter(fmt)
+        root.addHandler(rotating)
+    except OSError:
+        # A logging file we can't open must never stop the daemon starting —
+        # stderr (which launchd captures) is enough on its own.
+        logging.getLogger("streamdeckd").warning(
+            "could not open rotating log file; logging to stderr only"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    _configure_logging(args.verbose)
 
     log = logging.getLogger("streamdeckd")
     try:

@@ -407,6 +407,59 @@ def test_reaper_skips_when_ghostty_not_running(tmp_path):
     assert d.model.get("a") is not None
 
 
+# -- startup re-adoption: repaint sessions that outlived a restart ---------
+
+
+def test_readopt_repaints_live_registry_sessions(tmp_path):
+    ghostty = FakeGhostty(live=("U1", "U2"))
+    registry = Registry(path=tmp_path / "r.json")
+    # A prior daemon persisted two bindings; both surfaces are still live.
+    from gsm.registry import Session
+    registry.upsert(Session(tag="a", uuid="U1", working_directory="/w/repo-a"))
+    registry.upsert(Session(tag="b", uuid="U2", working_directory="/w/repo-b"))
+    manager = Manager(ghostty=ghostty, registry=registry)
+    d = Daemon(manager=manager, renderer=RecordingRenderer(),
+               socket_path=tmp_path / "d.sock", launcher_key=None)
+
+    assert d._readopt_live_sessions() == 2
+    assert d.model.get("a").uuid == "U1"
+    assert d.model.get("b").uuid == "U2"
+    # Re-adopted DONE (we can't know what they were mid-flight).
+    assert d.model.get("a").state is KeyState.DONE
+    assert d.model.get("a").label == "repo-a"
+
+
+def test_readopt_prunes_dead_registry_sessions(tmp_path):
+    ghostty = FakeGhostty(live=("U1",))  # U2's surface is gone
+    registry = Registry(path=tmp_path / "r.json")
+    from gsm.registry import Session
+    registry.upsert(Session(tag="a", uuid="U1", working_directory="/w/a"))
+    registry.upsert(Session(tag="b", uuid="U2", working_directory="/w/b"))
+    manager = Manager(ghostty=ghostty, registry=registry)
+    d = Daemon(manager=manager, renderer=RecordingRenderer(),
+               socket_path=tmp_path / "d.sock", launcher_key=None)
+
+    assert d._readopt_live_sessions() == 1
+    assert d.model.get("b") is None            # not resurrected
+    assert manager.registry.get("b") is None   # stale binding dropped
+    assert d.model.get("a") is not None
+
+
+def test_readopt_skips_when_ghostty_not_running(tmp_path):
+    ghostty = FakeGhostty(live=("U1",))
+    ghostty.running = False  # can't confirm liveness
+    registry = Registry(path=tmp_path / "r.json")
+    from gsm.registry import Session
+    registry.upsert(Session(tag="a", uuid="U1", working_directory="/w/a"))
+    manager = Manager(ghostty=ghostty, registry=registry)
+    d = Daemon(manager=manager, renderer=RecordingRenderer(),
+               socket_path=tmp_path / "d.sock", launcher_key=None)
+
+    assert d._readopt_live_sessions() == 0
+    assert d.model.get("a") is None            # nothing touched
+    assert manager.registry.get("a") is not None  # registry left intact
+
+
 # -- watchdog: clear a spinner stuck by an interrupt -----------------------
 
 

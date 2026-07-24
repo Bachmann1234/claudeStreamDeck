@@ -329,6 +329,38 @@ def test_uuid_not_overwritten_once_set():
     assert m.get("a").uuid == "U1"
 
 
+def test_uuid_collision_rejected_at_allocation():
+    # The live bug: two sessions in the same repo, and the second's SessionStart
+    # resolves the *first*'s frontmost surface. The model must refuse the shared
+    # UUID rather than point two keys at one window.
+    m = SessionModel()
+    m.apply(_msg("a", "SessionStart", uuid="U1", cwd="/w"))
+    m.apply(_msg("b", "SessionStart", uuid="U1", cwd="/w"))  # same surface (misresolve)
+    assert m.get("a").uuid == "U1"
+    assert m.get("b").uuid is None  # tracked, but not double-bound
+    assert m.get("b").key_index is not None  # still gets its own key
+
+
+def test_uuid_collision_rejected_on_later_fill():
+    # A session that resolved uuid-less at start must not later adopt a sibling's
+    # already-bound surface.
+    m = SessionModel()
+    m.apply(_msg("a", "SessionStart", uuid="U1", cwd="/w"))
+    m.apply(_msg("b", "SessionStart", cwd="/w"))  # no uuid yet
+    m.apply(_msg("b", "UserPromptSubmit", uuid="U1"))  # tries to grab U1
+    assert m.get("b").uuid is None
+
+
+def test_uuid_heals_to_its_own_surface_after_collision():
+    # Once b re-resolves to its *own* surface, the model accepts it.
+    m = SessionModel()
+    m.apply(_msg("a", "SessionStart", uuid="U1", cwd="/w"))
+    m.apply(_msg("b", "SessionStart", uuid="U1", cwd="/w"))  # misresolved -> rejected
+    assert m.get("b").uuid is None
+    m.apply(_msg("b", "UserPromptSubmit", uuid="U2"))  # b's real surface
+    assert m.get("b").uuid == "U2"
+
+
 def test_branch_updates_on_later_message():
     m = SessionModel()
     m.apply(_msg("a", "SessionStart", branch="main"))

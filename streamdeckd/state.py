@@ -270,6 +270,20 @@ class SessionModel:
                 return slot
         return None
 
+    def _uuid_taken_by_other(self, uuid: str, session_id: str) -> bool:
+        """Is ``uuid`` already bound to a *different* live session?
+
+        A Ghostty surface hosts exactly one Claude session, so two slots must
+        never share a UUID — if they did, both keys would focus the same window
+        and one session would be unreachable. The hook resolves the UUID from the
+        *frontmost* surface, which races when a SessionStart fires while a sibling
+        in the same cwd is focused; this is the model's backstop against that
+        race binding the wrong (shared) surface."""
+        return any(
+            s.uuid == uuid and s.session_id != session_id
+            for s in self._slots.values()
+        )
+
     def _used_keys(self) -> set[int]:
         return {s.key_index for s in self._slots.values() if s.key_index is not None}
 
@@ -356,13 +370,20 @@ class SessionModel:
         if existing is None:
             # First time we've heard of this session -> track and try to admit.
             state = target if isinstance(target, KeyState) else KeyState.STARTING
+            # Reject a UUID another session already holds: it's a mis-resolution
+            # (the hook picked a sibling's frontmost surface), and keeping it
+            # would leave both keys focusing one window. Track uuid-less instead;
+            # a later re-resolve heals it once this session's surface is frontmost.
+            uuid = msg.uuid
+            if uuid and self._uuid_taken_by_other(uuid, msg.session_id):
+                uuid = None
             slot = Slot(
                 session_id=msg.session_id,
                 key_index=None,
                 state=state,
                 label=msg.label or _default_label(msg),
                 branch=msg.branch,
-                uuid=msg.uuid,
+                uuid=uuid,
                 tty=msg.tty,
                 cwd=msg.cwd,
             )
@@ -384,12 +405,16 @@ class SessionModel:
             existing.label = _default_label(msg)
         if msg.branch:
             existing.branch = msg.branch
-        # Fill the surface UUID only if we don't already have one: a re-resolution
-        # on activity (the hook re-sends it on UserPromptSubmit) heals a session
-        # that couldn't be correlated at SessionStart, but never overwrites a
-        # good binding — a live surface's UUID is stable, so a *different* UUID
-        # here would be a same-cwd sibling we shouldn't clobber onto this session.
-        if msg.uuid and not existing.uuid:
+        # Fill the surface UUID only if we don't already have one, and only if no
+        # other session already claims it. A re-resolution on activity (the hook
+        # re-sends it on UserPromptSubmit) heals a session that couldn't be
+        # correlated at SessionStart, but never overwrites a good binding — a
+        # live surface's UUID is stable, so a *different* UUID here would be a
+        # same-cwd sibling we shouldn't clobber onto this session — and never
+        # binds a surface a sibling already owns.
+        if msg.uuid and not existing.uuid and not self._uuid_taken_by_other(
+            msg.uuid, existing.session_id
+        ):
             existing.uuid = msg.uuid
         if msg.tty:
             existing.tty = msg.tty
